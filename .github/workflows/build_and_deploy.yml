@@ -1,0 +1,275 @@
+name: Test, Build and Deploy
+
+# 흐름
+#   test ─┬─ (PR 은 여기서 끝)
+#         └─ changes ─ build(api/web/admin 중 바뀐 것만, 병렬) ─ deploy
+#
+# - 이미지는 GitHub 러너에서 빌드해 GHCR 에 push 한다. 운영 VM 은 빌드하지 않는다.
+# - VM 은 pull 후 `compose up -d --wait` 로 이미지가 바뀐 서비스만 교체한다.
+#   db/redis/nginx 와 바뀌지 않은 앱은 그대로 유지된다.
+# - 교체가 끝난 뒤에 안 쓰는 이미지를 정리한다.
+
+on:
+  push:
+    paths:
+      - "apps/api/**"
+      - "apps/web/**"
+      - "apps/admin/**"
+      - "packages/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "turbo.json"
+      - "tsconfig.base.json"
+      - "ci/dockers/prod/**"
+      - "ci/nginx/**"
+      - "ci/docker-composes/docker-compose.prod.yaml"
+      - ".github/workflows/build_and_deploy.yml"
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  # 수동 실행 시에는 변경 감지 없이 api/web/admin 이미지를 모두 다시 빌드한다.
+  # (최초 전환, 캐시 초기화, 레지스트리에 이미지가 없을 때 사용)
+  workflow_dispatch:
+
+env:
+  TURBO_VERSION: 2.10.3
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 테스트 — GitHub 러너에서 실행. e2e 는 globalSetup 이 docker compose 로
+  # postgres/redis 를 자체 기동하므로 별도 서비스/시크릿이 필요 없다.
+  # 테스트용 env 는 커밋된 envs/.env.test(더미값)로 충당한다.
+  # ---------------------------------------------------------------------------
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.10.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # 테스트가 import 하는 워크스페이스 패키지의 타입/런타임 산출물 준비
+      - name: Generate Prisma client
+        run: pnpm --filter @template/database db:generate
+
+      - name: Build workspace deps
+        run: |
+          pnpm --filter @template/database build
+          pnpm --filter @template/shared build
+
+      - name: Unit tests
+        run: pnpm --filter api test
+
+      # e2e: globalSetup 이 docker-compose.test.yaml 로 인프라를 띄우고 정리한다.
+      - name: E2E tests
+        run: pnpm --filter api test:e2e
+
+  # ---------------------------------------------------------------------------
+  # 변경 감지 — 어떤 앱 이미지를 다시 빌드해야 하는지 결정한다.
+  # 공용 패키지/루트 설정/Dockerfile/워크플로우가 바뀌면 셋 다 빌드한다.
+  # ---------------------------------------------------------------------------
+  changes:
+    needs: test
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      apps: ${{ steps.apps.outputs.apps }}
+      image_prefix: ${{ steps.prefix.outputs.image_prefix }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Detect changed apps
+        id: filter
+        if: github.event_name == 'push'
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            _shared: &shared
+              - "packages/**"
+              - "package.json"
+              - "pnpm-lock.yaml"
+              - "pnpm-workspace.yaml"
+              - "turbo.json"
+              - "tsconfig.base.json"
+              - "ci/dockers/prod/**"
+              - ".github/workflows/build_and_deploy.yml"
+            api:
+              - *shared
+              - "apps/api/**"
+            web:
+              - *shared
+              - "apps/web/**"
+            admin:
+              - *shared
+              - "apps/admin/**"
+
+      - name: Resolve build matrix
+        id: apps
+        env:
+          CHANGED: ${{ steps.filter.outputs.changes }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            apps='["api","web","admin"]'
+          else
+            apps=$(echo "$CHANGED" | jq -c 'map(select(. != "_shared"))')
+          fi
+          echo "apps=$apps" >> "$GITHUB_OUTPUT"
+          echo "빌드 대상: $apps"
+
+      # GHCR 이미지 경로는 소문자여야 한다.
+      - name: Resolve image prefix
+        id: prefix
+        run: echo "image_prefix=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+  # ---------------------------------------------------------------------------
+  # 이미지 빌드 — 바뀐 앱만, 앱별 병렬. 레이어 캐시는 GitHub Actions 캐시에
+  # 앱별 scope 로 보관해 다음 빌드에서 pnpm install 레이어 등을 재사용한다.
+  # ---------------------------------------------------------------------------
+  build:
+    needs: changes
+    if: needs.changes.outputs.apps != '[]'
+    runs-on: ubuntu-latest
+    environment: product
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        app: ${{ fromJson(needs.changes.outputs.apps) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # NEXT_PUBLIC_* 는 Next 빌드 시 번들에 인라인되므로 빌드 시점에 필요하다.
+      # 운영 .env(ENV_FILES 시크릿)에서 필요한 키만 뽑아 build-arg 로 넘긴다.
+      - name: Load build-time env from ENV_FILES
+        if: matrix.app != 'api'
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILES }}
+        run: |
+          printf '%s\n' "$ENV_FILE" > "$RUNNER_TEMP/deploy.env"
+          for key in PROJECT_NAME API_BASE_URL NEXT_PUBLIC_API_BASE_URL API_PUBLIC_URL NEXT_PUBLIC_GOOGLE_MAPS_API_KEY; do
+            value=$(grep -E "^${key}=" "$RUNNER_TEMP/deploy.env" | tail -n1 | cut -d= -f2- | sed -e 's/^"//' -e 's/"$//')
+            echo "${key}=${value}" >> "$GITHUB_ENV"
+          done
+          rm -f "$RUNNER_TEMP/deploy.env"
+
+      - name: Build and push ${{ matrix.app }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ci/dockers/prod/Dockerfile.${{ matrix.app }}
+          push: true
+          tags: |
+            ${{ needs.changes.outputs.image_prefix }}/${{ matrix.app }}:latest
+            ${{ needs.changes.outputs.image_prefix }}/${{ matrix.app }}:${{ github.sha }}
+          build-args: |
+            PROJECT_NAME=${{ env.PROJECT_NAME }}
+            API_BASE_URL=${{ env.API_BASE_URL }}
+            NEXT_PUBLIC_API_BASE_URL=${{ env.NEXT_PUBLIC_API_BASE_URL }}
+            API_PUBLIC_URL=${{ env.API_PUBLIC_URL }}
+            NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=${{ env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY }}
+          cache-from: type=gha,scope=${{ matrix.app }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.app }}
+
+  # ---------------------------------------------------------------------------
+  # 배포 — VM 에서 pull 후 이미지가 바뀐 서비스만 교체. 빌드가 없었어도
+  # (compose/nginx 만 바뀐 경우) 설정 반영을 위해 실행한다.
+  # 동시 배포가 겹치지 않도록 concurrency 로 직렬화한다.
+  # ---------------------------------------------------------------------------
+  deploy:
+    needs: [test, changes, build]
+    if: >-
+      always() &&
+      github.event_name != 'pull_request' &&
+      github.ref == 'refs/heads/main' &&
+      needs.test.result == 'success' &&
+      needs.changes.result == 'success' &&
+      (needs.build.result == 'success' || needs.build.result == 'skipped')
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-prod
+      cancel-in-progress: false
+    environment: product
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Deploy to VM via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILES }}
+          PROJECT_NAME: ${{ secrets.PROJECT_NAME }}
+          NETWORK_NAME: ${{ secrets.NETWORK_NAME }}
+          IMAGE_PREFIX: ${{ needs.changes.outputs.image_prefix }}
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.VM_SSH_KEY }}
+          port: ${{ secrets.VM_PORT }}
+          envs: ENV_FILE,PROJECT_NAME,NETWORK_NAME,IMAGE_PREFIX,GHCR_USER,GHCR_TOKEN
+          script: |
+            set -euo pipefail
+
+            # VM의 프로젝트 위치를 변경 해야합니다. monorepo-template -> Repository 이름으로
+            cd /srv/monorepo-template
+
+            # compose / nginx 템플릿 등 설정 파일 최신화 (소스 빌드는 하지 않는다)
+            git pull origin main
+
+            # .env 생성 + 이미지 경로 기록 (VM 에서 수동으로 compose 를 써도 동작하도록)
+            printf '%s\n' "$ENV_FILE" > .env
+            grep -q '^IMAGE_PREFIX=' .env || echo "IMAGE_PREFIX=$IMAGE_PREFIX" >> .env
+
+            # 네트워크 없으면 생성
+            docker network inspect "$NETWORK_NAME" >/dev/null 2>&1 || \
+            docker network create "$NETWORK_NAME"
+
+            COMPOSE="docker compose -p $PROJECT_NAME --env-file .env -f ci/docker-composes/docker-compose.prod.yaml"
+
+            # GHCR 에서 새 이미지 pull (기존 컨테이너는 계속 서비스 중)
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+            IMAGE_PREFIX="$IMAGE_PREFIX" $COMPOSE pull --quiet
+            docker logout ghcr.io
+
+            # 이미지가 바뀐 서비스만 재생성. --wait 로 healthcheck 통과까지 대기하며
+            # 통과하지 못하면 실패로 끝낸다. 바뀌지 않은 서비스는 건드리지 않는다.
+            IMAGE_PREFIX="$IMAGE_PREFIX" $COMPOSE up -d --no-build --wait --remove-orphans
+
+            # 교체가 끝난 뒤 정리: 태그가 떨어진 이전 이미지(dangling)와
+            # 일주일 넘게 안 쓰인 이미지만 제거. 최근 이미지는 롤백용으로 남긴다.
+            docker image prune -f
+            docker image prune -af --filter "until=168h"
+
+            IMAGE_PREFIX="$IMAGE_PREFIX" $COMPOSE ps
+            echo "✅ 배포 완료"

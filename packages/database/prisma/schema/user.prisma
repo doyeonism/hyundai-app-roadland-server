@@ -1,0 +1,85 @@
+model User {
+  id        String @id @default(uuid())
+  nickname  String
+  email     String
+
+  // 역할: "USER"(서비스만) | "ADMIN"(서비스+관리자). @template/shared 의 ROLES 와 일치
+  role      String @default("USER")
+  // bcrypt 해시된 비밀번호 (소셜 전용 계정은 없을 수 있어 nullable)
+  password  String?
+  // 계정 상태: "ACTIVE" | "PENDING" | "SUSPENDED" (checkauth 레이아웃에서 사용)
+  status    String @default("ACTIVE")
+
+  // 인증 토큰(access/refresh)과 OTP 는 DB 가 아닌 Redis 에서 관리합니다.
+  // (apps/api/src/auth/services/auth.service.ts + shared/redis)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  socialAccounts SocialAccount[]
+  userInfo UserInfo?
+  pointTransactions PointTransaction[]
+  orders            Order[]
+  billingKey        BillingKey?
+  subscriptions     UserSubscription[]
+  termsAgreements   UserTermsAgreement[]
+
+  @@unique([email])
+  @@map("users")
+}
+
+model UserInfo {
+  id String @id @default(uuid())
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([userId])
+  @@index([userId])
+  @@map("user_infos")
+}
+
+
+// 포인트 변동 내역 모델 신설
+model PointTransaction {
+  id        String   @id @default(uuid())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+  amount    Int      // 변동 금액 (충전: +, 사용: -)
+  type      String   // 종류 (CHARGE, USE, REFUND 등)
+  description String? // 상세 내용
+  
+  createdAt DateTime @default(now()) @map("created_at")
+  @@index([userId])
+  @@map("point_transactions")
+}
+
+model SocialAccount {
+  id                String @id @default(uuid())
+  user              User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId            String
+  provider          String // "KAKAO" | "NAVER" | "DISCORD" (@template/shared SOCIAL_PROVIDERS 와 일치)
+  providerAccountId String // provider 가 준 고유 id. 항상 string (카카오 숫자 id 도 문자열로 저장)
+
+  // ── 유저별 소셜 토큰 (로그인 용도에는 불필요) ──────────────────────────────
+  // 알림톡 등 "사업자/봇 자격" 발송은 SaaS 키(env) 로 처리하므로 유저별 토큰이 필요 없다.
+  // 나중에 "유저 카카오톡 직접 메시지 / 친구목록 / 디스코드 서버 자동가입" 등
+  // 유저 본인 자격의 소셜 API 호출이 필요해지면 아래 주석을 해제하고 migrate 한다.
+  // accessToken           String?   // 소셜 액세스 토큰
+  // accessTokenExpiresAt  DateTime? // 액세스 토큰 만료일
+  // refreshToken          String?   // 소셜 리프레시 토큰
+  // refreshTokenExpiresAt DateTime? // 리프레시 토큰 만료일
+
+  // ── provider 별 raw 프로필 스냅샷 (선택) ──────────────────────────────────
+  // provider 마다 응답 구조가 다른 원본을 통째로 보관하고 싶을 때 사용. Postgres 에선 JSONB 로 매핑됨.
+  // 정규화된 식별 필드는 이미 User/컬럼에 저장하므로 로그인 용도에는 불필요. 필요 시 주석 해제.
+  // profile Json?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt      @map("updated_at")
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+  @@map("social_accounts")
+}

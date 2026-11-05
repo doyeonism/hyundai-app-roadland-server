@@ -1,0 +1,210 @@
+services:
+  db-migrate:
+    build:
+      context: ../../
+      dockerfile: ci/dockers/dev/Dockerfile.db-migrate
+    command: pnpm --filter database db:dev
+    volumes:
+      - ../../packages/database:/app/packages/database
+      - /app/packages/database/node_modules
+    networks:
+      - custom-network
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - ../../envs/.env.dev
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${PROJECT_NAME}-db:5432/${POSTGRES_DB}
+
+  server:
+    build:
+      context: ../../
+      dockerfile: ci/dockers/dev/Dockerfile.api
+    container_name: ${PROJECT_NAME}-server
+    working_dir: /app/apps/api
+    # 바인드 마운트는 이미지 안의 node_modules 를 가리므로, 마운트된 패키지마다
+    # 익명 볼륨으로 node_modules 를 보존한다. 또한 api 는 @template/shared 의 dist 와
+    # prisma generated 클라이언트를 요구하므로 기동 전에 생성/빌드한다 (수 초, 멱등).
+    # shared 는 database 의 dist(project reference)에 의존하므로 database → shared 순서.
+    command: >
+      sh -c "cd /app
+      && pnpm --filter @template/database db:generate
+      && pnpm --filter @template/database build
+      && pnpm --filter @template/shared build
+      && pnpm --filter api start:dev"
+    volumes:
+      - ../../apps/api:/app/apps/api
+      - ../../packages/database:/app/packages/database
+      # shared 도 마운트해야 호스트에서 고친 공용 타입/유틸이 이미지 재빌드 없이 반영된다.
+      - ../../packages/shared:/app/packages/shared
+      - /app/apps/api/node_modules
+      - /app/packages/database/node_modules
+      - /app/packages/shared/node_modules
+    env_file:
+      - ../../envs/.env.dev
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${PROJECT_NAME}-db:5432/${POSTGRES_DB}
+      - REDIS_HOST=${PROJECT_NAME}-redis
+      - REDIS_PORT=6379
+    ports:
+      - ${SERVER_PORT}:${SERVER_PORT}
+    networks:
+      - custom-network
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -f http://localhost:${SERVER_PORT}/api/${PROJECT_NAME}/v1/health || exit 1",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ../../
+      dockerfile: ci/dockers/dev/Dockerfile.web
+    container_name: ${PROJECT_NAME}-web
+    working_dir: /app/apps/web
+    # packages/ 전체를 마운트하므로 각 패키지의 node_modules 를 익명 볼륨으로 보존하고,
+    # 호스트에 없을 수 있는 generated 클라이언트와 shared dist 를 기동 전에 만든다.
+    command: >
+      sh -c "cd /app
+      && pnpm --filter @template/database db:generate
+      && pnpm --filter @template/database build
+      && pnpm --filter @template/shared build
+      && pnpm --filter web dev"
+    volumes:
+      - ../../apps/web:/app/apps/web
+      - ../../packages:/app/packages
+      - /app/apps/web/node_modules
+      - /app/packages/database/node_modules
+      - /app/packages/shared/node_modules
+      - /app/packages/ui/node_modules
+    env_file:
+      - ../../envs/.env.dev
+    environment:
+      - NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL}
+      - API_BASE_URL=${API_BASE_URL}
+      # 브라우저용 프로젝트명은 PROJECT_NAME 에서 유도 (env_file 값보다 우선)
+      - NEXT_PUBLIC_PROJECT_NAME=${PROJECT_NAME}
+      - WEB_PORT=${WEB_PORT}
+    ports:
+      - ${WEB_PORT}:${WEB_PORT}
+    networks:
+      - custom-network
+
+  admin:
+    build:
+      context: ../../
+      dockerfile: ci/dockers/dev/Dockerfile.admin
+    container_name: ${PROJECT_NAME}-admin
+    working_dir: /app/apps/admin
+    # packages/ 전체를 마운트하므로 각 패키지의 node_modules 를 익명 볼륨으로 보존하고,
+    # 호스트에 없을 수 있는 generated 클라이언트와 shared dist 를 기동 전에 만든다.
+    command: >
+      sh -c "cd /app
+      && pnpm --filter @template/database db:generate
+      && pnpm --filter @template/database build
+      && pnpm --filter @template/shared build
+      && pnpm --filter admin dev"
+    volumes:
+      - ../../apps/admin:/app/apps/admin
+      - ../../packages:/app/packages
+      - /app/apps/admin/node_modules
+      - /app/packages/database/node_modules
+      - /app/packages/shared/node_modules
+      - /app/packages/ui/node_modules
+    env_file:
+      - ../../envs/.env.dev
+    environment:
+      - NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL}
+      - API_BASE_URL=${API_BASE_URL}
+      # 브라우저용 프로젝트명은 PROJECT_NAME 에서 유도 (env_file 값보다 우선)
+      - NEXT_PUBLIC_PROJECT_NAME=${PROJECT_NAME}
+      - ADMIN_PORT=${ADMIN_PORT}
+      - ADMIN_BASE_PATH=${ADMIN_BASE_PATH}
+    ports:
+      - ${ADMIN_PORT}:${ADMIN_PORT}
+    networks:
+      - custom-network
+
+  db:
+    image: postgres:16-alpine
+    container_name: ${PROJECT_NAME}-db
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+    volumes:
+      - ../../ci/db/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - ${DB_PORT}:5432
+    networks:
+      - custom-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: ${PROJECT_NAME}-redis
+    command: redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy volatile-lru
+    ports:
+      - ${REDIS_PORT:-6379}:6379
+    volumes:
+      - redisdata:/data
+    networks:
+      - custom-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: ${PROJECT_NAME}-nginx
+    environment:
+      - PROJECT_NAME=${PROJECT_NAME}
+      - SERVER_PORT=${SERVER_PORT:-3000}
+      - WEB_PORT=${WEB_PORT:-3001}
+      - ADMIN_PORT=${ADMIN_PORT:-3002}
+      - SERVER_NAME=${PROJECT_NAME}.doyeonism.com
+      - NGINX_ENVSUBST_FILTER=PROJECT_NAME|SERVER_PORT|WEB_PORT|ADMIN_PORT|SERVER_NAME
+    volumes:
+      - ../nginx/devtemplates:/etc/nginx/templates:ro
+    depends_on:
+      server:
+        condition: service_started
+      web:
+        condition: service_started
+      admin:
+        condition: service_started
+    networks:
+      - custom-network
+      - edge
+
+networks:
+  custom-network:
+    name: ${NETWORK_NAME}
+    external: true
+  # 엣지 프록시(Caddy)와 공유하는 네트워크. 서버 셋업 시 `docker network create edge` 필요.
+  edge:
+    external: true
+    name: ${EDGE_NETWORK_NAME:-edge}
+
+volumes:
+  pgdata:
+    driver: local
+  redisdata:
+    driver: local
