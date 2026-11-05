@@ -11,3 +11,20 @@ export const refreshKey = (userId: string) => `refresh:${userId}`;
  * 액세스 토큰 검증(JwtAccessStrategy)이 매 요청 확인해 이미 발급된 토큰도 즉시 거부한다.
  */
 export const suspendedKey = (userId: string) => `suspended:${userId}`;
+
+// --- 로드랜드 (apps/api/src/roadland) ---------------------------------------
+
+/** 기기 토큰 해시 → 차량 ID 캐시. 매 요청 DB 조회를 피한다. */
+export const vehicleTokenKey = (tokenHash: string) => `rl:token:${tokenHash}`;
+
+/** 차량별 쓰기 잠금. 정산·구매·업그레이드·수령이 같은 잔액을 동시에 건드리지 않게 한다. */
+export const vehicleLockKey = (vehicleId: string) => `rl:lock:${vehicleId}`;
+
+/** 땅 점수 랭킹(가진 땅 레벨 합). sorted set. */
+export const landRankKey = () => "rl:rank:land";
+
+/** 주간 주행 크레딧 랭킹. week 는 그 주 월요일(서울, YYYY-MM-DD). sorted set. */
+export const weeklyRankKey = (week: string) => `rl:rank:weekly:${week}`;
+
+/** 시연용 시계 오프셋(ms). ROADLAND_DEV_TOOLS 가 켜졌을 때만 쓴다. */
+export const vehicleClockKey = (vehicleId: string) => `rl:clock:${vehicleId}`;

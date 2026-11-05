@@ -1,21 +1,23 @@
 services:
-  db-migrate:
-    build:
-      context: ../../
-      dockerfile: ci/dockers/dev/Dockerfile.db-migrate
-    command: pnpm --filter database db:dev
-    volumes:
-      - ../../packages/database:/app/packages/database
-      - /app/packages/database/node_modules
-    networks:
-      - custom-network
-    depends_on:
-      db:
-        condition: service_healthy
-    env_file:
-      - ../../envs/.env.dev
-    environment:
-      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${PROJECT_NAME}-db:5432/${POSTGRES_DB}
+  # 로드랜드는 db · server · redis 만 쓴다. web/admin/nginx/db-migrate 는 필요할 때 주석을 푼다.
+  # db-migrate 대신 server 가 기동 전에 prisma migrate deploy 로 스키마를 맞춘다.
+  # db-migrate:
+  #   build:
+  #     context: ../../
+  #     dockerfile: ci/dockers/dev/Dockerfile.db-migrate
+  #   command: pnpm --filter database db:dev
+  #   volumes:
+  #     - ../../packages/database:/app/packages/database
+  #     - /app/packages/database/node_modules
+  #   networks:
+  #     - custom-network
+  #   depends_on:
+  #     db:
+  #       condition: service_healthy
+  #   env_file:
+  #     - ../../envs/.env.dev
+  #   environment:
+  #     - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${PROJECT_NAME}-db:5432/${POSTGRES_DB}
 
   server:
     build:
@@ -30,6 +32,7 @@ services:
     command: >
       sh -c "cd /app
       && pnpm --filter @template/database db:generate
+      && pnpm --filter @template/database db:deploy
       && pnpm --filter @template/database build
       && pnpm --filter @template/shared build
       && pnpm --filter api start:dev"
@@ -47,6 +50,10 @@ services:
       - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${PROJECT_NAME}-db:5432/${POSTGRES_DB}
       - REDIS_HOST=${PROJECT_NAME}-redis
       - REDIS_PORT=6379
+      # Windows/macOS Docker Desktop 바인드 마운트는 파일 변경 이벤트가 컨테이너로 오지 않아
+      # nest --watch 가 수정을 못 본다. tsc 감시를 폴링으로 바꾼다.
+      - TSC_WATCHFILE=DynamicPriorityPolling
+      - TSC_WATCHDIRECTORY=RecursiveDirectoryUsingDynamicPriorityPolling
     ports:
       - ${SERVER_PORT}:${SERVER_PORT}
     networks:
@@ -66,74 +73,74 @@ services:
       redis:
         condition: service_healthy
 
-  web:
-    build:
-      context: ../../
-      dockerfile: ci/dockers/dev/Dockerfile.web
-    container_name: ${PROJECT_NAME}-web
-    working_dir: /app/apps/web
-    # packages/ 전체를 마운트하므로 각 패키지의 node_modules 를 익명 볼륨으로 보존하고,
-    # 호스트에 없을 수 있는 generated 클라이언트와 shared dist 를 기동 전에 만든다.
-    command: >
-      sh -c "cd /app
-      && pnpm --filter @template/database db:generate
-      && pnpm --filter @template/database build
-      && pnpm --filter @template/shared build
-      && pnpm --filter web dev"
-    volumes:
-      - ../../apps/web:/app/apps/web
-      - ../../packages:/app/packages
-      - /app/apps/web/node_modules
-      - /app/packages/database/node_modules
-      - /app/packages/shared/node_modules
-      - /app/packages/ui/node_modules
-    env_file:
-      - ../../envs/.env.dev
-    environment:
-      - NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL}
-      - API_BASE_URL=${API_BASE_URL}
-      # 브라우저용 프로젝트명은 PROJECT_NAME 에서 유도 (env_file 값보다 우선)
-      - NEXT_PUBLIC_PROJECT_NAME=${PROJECT_NAME}
-      - WEB_PORT=${WEB_PORT}
-    ports:
-      - ${WEB_PORT}:${WEB_PORT}
-    networks:
-      - custom-network
+  # web:
+  #   build:
+  #     context: ../../
+  #     dockerfile: ci/dockers/dev/Dockerfile.web
+  #   container_name: ${PROJECT_NAME}-web
+  #   working_dir: /app/apps/web
+  #   # packages/ 전체를 마운트하므로 각 패키지의 node_modules 를 익명 볼륨으로 보존하고,
+  #   # 호스트에 없을 수 있는 generated 클라이언트와 shared dist 를 기동 전에 만든다.
+  #   command: >
+  #     sh -c "cd /app
+  #     && pnpm --filter @template/database db:generate
+  #     && pnpm --filter @template/database build
+  #     && pnpm --filter @template/shared build
+  #     && pnpm --filter web dev"
+  #   volumes:
+  #     - ../../apps/web:/app/apps/web
+  #     - ../../packages:/app/packages
+  #     - /app/apps/web/node_modules
+  #     - /app/packages/database/node_modules
+  #     - /app/packages/shared/node_modules
+  #     - /app/packages/ui/node_modules
+  #   env_file:
+  #     - ../../envs/.env.dev
+  #   environment:
+  #     - NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL}
+  #     - API_BASE_URL=${API_BASE_URL}
+  #     # 브라우저용 프로젝트명은 PROJECT_NAME 에서 유도 (env_file 값보다 우선)
+  #     - NEXT_PUBLIC_PROJECT_NAME=${PROJECT_NAME}
+  #     - WEB_PORT=${WEB_PORT}
+  #   ports:
+  #     - ${WEB_PORT}:${WEB_PORT}
+  #   networks:
+  #     - custom-network
 
-  admin:
-    build:
-      context: ../../
-      dockerfile: ci/dockers/dev/Dockerfile.admin
-    container_name: ${PROJECT_NAME}-admin
-    working_dir: /app/apps/admin
-    # packages/ 전체를 마운트하므로 각 패키지의 node_modules 를 익명 볼륨으로 보존하고,
-    # 호스트에 없을 수 있는 generated 클라이언트와 shared dist 를 기동 전에 만든다.
-    command: >
-      sh -c "cd /app
-      && pnpm --filter @template/database db:generate
-      && pnpm --filter @template/database build
-      && pnpm --filter @template/shared build
-      && pnpm --filter admin dev"
-    volumes:
-      - ../../apps/admin:/app/apps/admin
-      - ../../packages:/app/packages
-      - /app/apps/admin/node_modules
-      - /app/packages/database/node_modules
-      - /app/packages/shared/node_modules
-      - /app/packages/ui/node_modules
-    env_file:
-      - ../../envs/.env.dev
-    environment:
-      - NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL}
-      - API_BASE_URL=${API_BASE_URL}
-      # 브라우저용 프로젝트명은 PROJECT_NAME 에서 유도 (env_file 값보다 우선)
-      - NEXT_PUBLIC_PROJECT_NAME=${PROJECT_NAME}
-      - ADMIN_PORT=${ADMIN_PORT}
-      - ADMIN_BASE_PATH=${ADMIN_BASE_PATH}
-    ports:
-      - ${ADMIN_PORT}:${ADMIN_PORT}
-    networks:
-      - custom-network
+  # admin:
+  #   build:
+  #     context: ../../
+  #     dockerfile: ci/dockers/dev/Dockerfile.admin
+  #   container_name: ${PROJECT_NAME}-admin
+  #   working_dir: /app/apps/admin
+  #   # packages/ 전체를 마운트하므로 각 패키지의 node_modules 를 익명 볼륨으로 보존하고,
+  #   # 호스트에 없을 수 있는 generated 클라이언트와 shared dist 를 기동 전에 만든다.
+  #   command: >
+  #     sh -c "cd /app
+  #     && pnpm --filter @template/database db:generate
+  #     && pnpm --filter @template/database build
+  #     && pnpm --filter @template/shared build
+  #     && pnpm --filter admin dev"
+  #   volumes:
+  #     - ../../apps/admin:/app/apps/admin
+  #     - ../../packages:/app/packages
+  #     - /app/apps/admin/node_modules
+  #     - /app/packages/database/node_modules
+  #     - /app/packages/shared/node_modules
+  #     - /app/packages/ui/node_modules
+  #   env_file:
+  #     - ../../envs/.env.dev
+  #   environment:
+  #     - NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL}
+  #     - API_BASE_URL=${API_BASE_URL}
+  #     # 브라우저용 프로젝트명은 PROJECT_NAME 에서 유도 (env_file 값보다 우선)
+  #     - NEXT_PUBLIC_PROJECT_NAME=${PROJECT_NAME}
+  #     - ADMIN_PORT=${ADMIN_PORT}
+  #     - ADMIN_BASE_PATH=${ADMIN_BASE_PATH}
+  #   ports:
+  #     - ${ADMIN_PORT}:${ADMIN_PORT}
+  #   networks:
+  #     - custom-network
 
   db:
     image: postgres:16-alpine
@@ -171,28 +178,28 @@ services:
       timeout: 5s
       retries: 5
 
-  nginx:
-    image: nginx:1.25-alpine
-    container_name: ${PROJECT_NAME}-nginx
-    environment:
-      - PROJECT_NAME=${PROJECT_NAME}
-      - SERVER_PORT=${SERVER_PORT:-3000}
-      - WEB_PORT=${WEB_PORT:-3001}
-      - ADMIN_PORT=${ADMIN_PORT:-3002}
-      - SERVER_NAME=${PROJECT_NAME}.doyeonism.com
-      - NGINX_ENVSUBST_FILTER=PROJECT_NAME|SERVER_PORT|WEB_PORT|ADMIN_PORT|SERVER_NAME
-    volumes:
-      - ../nginx/devtemplates:/etc/nginx/templates:ro
-    depends_on:
-      server:
-        condition: service_started
-      web:
-        condition: service_started
-      admin:
-        condition: service_started
-    networks:
-      - custom-network
-      - edge
+  # nginx:
+  #   image: nginx:1.25-alpine
+  #   container_name: ${PROJECT_NAME}-nginx
+  #   environment:
+  #     - PROJECT_NAME=${PROJECT_NAME}
+  #     - SERVER_PORT=${SERVER_PORT:-3000}
+  #     - WEB_PORT=${WEB_PORT:-3001}
+  #     - ADMIN_PORT=${ADMIN_PORT:-3002}
+  #     - SERVER_NAME=${PROJECT_NAME}.doyeonism.com
+  #     - NGINX_ENVSUBST_FILTER=PROJECT_NAME|SERVER_PORT|WEB_PORT|ADMIN_PORT|SERVER_NAME
+  #   volumes:
+  #     - ../nginx/devtemplates:/etc/nginx/templates:ro
+  #   depends_on:
+  #     server:
+  #       condition: service_started
+  #     web:
+  #       condition: service_started
+  #     admin:
+  #       condition: service_started
+  #   networks:
+  #     - custom-network
+  #     - edge
 
 networks:
   custom-network:

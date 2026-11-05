@@ -1,0 +1,103 @@
+// 로드랜드: 주행으로 땅(육각 타일)을 모으는 차량 게임.
+// 서버에는 원본 좌표가 없다. 차가 좌표를 타일 축 좌표(q, r)로 바꿔 보낸다.
+// 토큰 캐시·중복 업로드 잠금·랭킹·시연용 시계는 Redis 에 둔다(apps/api/src/roadland).
+
+model Vehicle {
+  id             String   @id @default(uuid())
+  // 기기 토큰의 sha256. 원본 토큰은 차에만 있다.
+  tokenHash      String   @unique @map("token_hash")
+  credits        Int      @default(0)
+  safeStreak     Int      @default(0) @map("safe_streak")
+  bestSafeStreak Int      @default(0) @map("best_safe_streak")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  trips   VehicleTrip[]
+  visits  TileVisit[]
+  tiles   OwnedTile[]
+  ledger  CreditLedger[]
+
+  @@map("vehicles")
+}
+
+model VehicleTrip {
+  id           String   @id @default(uuid())
+  vehicleId    String   @map("vehicle_id")
+  vehicle      Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  // 차가 만든 주행 ID. 응답을 못 받고 다시 보내도 한 번만 정산한다.
+  clientTripId String   @map("client_trip_id")
+
+  startedAt           DateTime @map("started_at")
+  endedAt             DateTime @map("ended_at")
+  // 정산 기준 날짜(서울, YYYY-MM-DD). 일일 상한 계산에 쓴다.
+  day                 String
+  km                  Float
+  safetyScore         Int      @map("safety_score")
+  hardBrakes          Int      @map("hard_brakes")
+  warnings            Int
+  laneChanges         Int      @map("lane_changes")
+  signaledLaneChanges Int      @map("signaled_lane_changes")
+  // 지나간 타일 결과 [{ id, hardBrake, warning, assisted }]. 도착 요약 화면용.
+  tiles               Json
+
+  newTiles    Int     @map("new_tiles")
+  credits     Int
+  clean       Int
+  assistBonus Int     @map("assist_bonus")
+  mannerBonus Int     @map("manner_bonus")
+  excluded    Int
+  capReached  Boolean @map("cap_reached")
+  rejected    Boolean
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([vehicleId, clientTripId])
+  @@index([vehicleId, day])
+  @@index([vehicleId, endedAt])
+  @@map("vehicle_trips")
+}
+
+// 지나간 날짜별 기록. 살 수 있는 땅과 홈 루트(최근 7일 중 3일) 판정에 쓴다.
+model TileVisit {
+  vehicleId String  @map("vehicle_id")
+  vehicle   Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  q         Int
+  r         Int
+  day       String
+
+  @@id([vehicleId, q, r, day])
+  @@index([vehicleId, day])
+  @@map("tile_visits")
+}
+
+model OwnedTile {
+  vehicleId   String   @map("vehicle_id")
+  vehicle     Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  q           Int
+  r           Int
+  level       Int      @default(1)
+  // 마지막 방치 수익 수령 시각. 수익은 이 시각부터 요청 때 계산한다(타이머 없음).
+  collectedAt DateTime @map("collected_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@id([vehicleId, q, r])
+  @@map("owned_tiles")
+}
+
+// 모든 크레딧 변동. 잔액(Vehicle.credits)과 함께 같은 트랜잭션에서 쓴다.
+model CreditLedger {
+  id        String   @id @default(uuid())
+  vehicleId String   @map("vehicle_id")
+  vehicle   Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  amount    Int
+  // WELCOME | TRIP | BUY | UPGRADE | COLLECT
+  kind      String
+  refId     String?  @map("ref_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([vehicleId, createdAt])
+  @@map("credit_ledger")
+}
