@@ -1,16 +1,6 @@
 import { tileForLatLng } from "./hex";
 
-/** 특별 구간. 지나가면 기록 화면의 수집 목록이 채워진다. */
-export const SPECIALS: { id: string; name: string }[] = [
-  { name: "서울숲", at: [37.5444, 127.0374] as const },
-  { name: "성수대교", at: [37.5378, 127.035] as const },
-  { name: "한강 뚝섬", at: [37.5296, 127.0705] as const },
-  { name: "강남역", at: [37.4979, 127.0276] as const },
-].map((s) => ({ id: tileForLatLng(s.at[0], s.at[1]), name: s.name }));
-
-export const SPECIAL_BY_ID = new Map(SPECIALS.map((s) => [s.id, s.name]));
-
-/** 시연용 출퇴근 경로(성수동 집 → 서울숲 → 성수대교 → 강남역 회사). 위도, 경도. */
+/** 시연용 출퇴근 경로(성수동 집 → 성수대교 → 강남역 회사). 위도, 경도. */
 export const COMMUTE: [number, number][] = [
   [37.5446, 127.0559],
   [37.5447, 127.0466],
@@ -45,5 +35,6 @@ export function sampleRoute(route: [number, number][], stepM = 30): [number, num
 }
 
 export function routeTiles(route: [number, number][]) {
-  return [...new Set(sampleRoute(route).map(([lat, lng]) => tileForLatLng(lat, lng)))];
+  // 타일(약 10m)보다 촘촘히 찍어야 칸을 건너뛰지 않는다.
+  return [...new Set(sampleRoute(route, 4).map(([lat, lng]) => tileForLatLng(lat, lng)))];
 }

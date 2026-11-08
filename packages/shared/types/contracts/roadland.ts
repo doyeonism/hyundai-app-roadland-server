@@ -52,12 +52,20 @@ export interface LandTileView {
   visitDays: string[];
   level: number; // 0이면 아직 사지 않은 땅
   collectedAt: string | null;
-  special: string | null; // 특별 구간 이름
+  /** 내 땅인지. */
   owned: boolean;
+  /** 다른 차의 땅인지. 이 경우 buyCost 를 내면 빼앗을 수 있다. */
+  ownedByOther: boolean;
+  /** 마지막 거래가. 주인이 없으면 null. */
+  price: number | null;
   homeRoute: boolean;
-  incomePerHour: number;
+  /** 내가 이 칸을 지나간 주행 중 안전 점수 기준을 넘은 수와 넘지 못한 수. */
+  goodTrips: number;
+  badTrips: number;
+  /** 1분마다 들어오는 크레딧. 레벨 × max(1, 5 + goodTrips − badTrips). */
+  incomePerMinute: number;
   pending: number;
-  buyCost: number | null; // 살 수 있으면 가격
+  buyCost: number | null; // 살 수 있으면 가격(주인 없으면 기본값, 있으면 거래가 + 인상분)
   upgradeCost: number | null; // 올릴 수 있으면 가격
 }
 
@@ -79,7 +87,7 @@ export interface TodaySummary {
 export interface CarHomeResponse {
   credits: number;
   pendingIncome: number;
-  incomePerHour: number;
+  incomePerMinute: number;
   idleCapHours: number;
   ownedTiles: number;
   buyableTiles: number;
@@ -99,7 +107,6 @@ export interface CarRecordsResponse {
   bestSafeStreak: number;
   recentScores: number[];
   ownedTiles: number;
-  specials: { id: string; name: string; collected: boolean }[];
 }
 
 export interface RankingEntry {

@@ -19,6 +19,9 @@ export const setupApplication = (app: INestApplication) => {
   // 1. 글로벌 프리픽스 설정
   app.setGlobalPrefix(`api/${PROJECT_NAME}`);
 
+  // 주행 기록은 10m 타일 목록이라 길게 달리면 기본 한도(100kb)를 넘는다.
+  (app as NestExpressApplication).useBodyParser("json", { limit: "2mb" });
+
   app.useGlobalPipes(
     new ValidationPipe({
       transform: true,

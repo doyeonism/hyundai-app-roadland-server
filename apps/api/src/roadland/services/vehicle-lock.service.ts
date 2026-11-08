@@ -34,4 +34,11 @@ export class VehicleLockService {
       await this.redis.raw.eval(RELEASE, 1, key, owner);
     }
   }
+
+  /** 여러 차를 함께 잠근다(땅을 빼앗을 때 산 차와 뺏긴 차). 늘 같은 순서로 잡아 서로 기다리다 막히지 않게 한다. */
+  async runAll<T>(vehicleIds: string[], work: () => Promise<T>): Promise<T> {
+    const [first, ...rest] = [...new Set(vehicleIds)].sort();
+    if (!first) return work();
+    return this.run(first, () => this.runAll(rest, work));
+  }
 }

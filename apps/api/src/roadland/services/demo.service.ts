@@ -3,7 +3,7 @@ import { prisma } from "@template/database";
 
 import { parseTileId } from "../domain/hex";
 import { COMMUTE, RIVERSIDE, routeTiles, sampleRoute } from "../domain/places";
-import { daysAgo, RULES, seoulDay, tripCredits } from "../domain/rules";
+import { daysAgo, isGoodTrip, RULES, seoulDay, tripCredits } from "../domain/rules";
 import { ClockService } from "./clock.service";
 import { GameService } from "./game.service";
 import { RankingService } from "./ranking.service";
@@ -45,6 +45,7 @@ export class DemoService {
       await prisma.$transaction([
         prisma.vehicleTrip.deleteMany({ where: { vehicleId } }),
         prisma.tileVisit.deleteMany({ where: { vehicleId } }),
+        prisma.tileRecord.deleteMany({ where: { vehicleId } }),
         prisma.ownedTile.deleteMany({ where: { vehicleId } }),
         prisma.creditLedger.deleteMany({ where: { vehicleId } }),
         prisma.vehicle.update({
@@ -81,6 +82,7 @@ export class DemoService {
         .map(({ id, i }) => ({
           vehicleId,
           ...parseTileId(id),
+          price: RULES.buyBaseCost,
           level: i < 4 ? 2 : 1,
           collectedAt: new Date(now.getTime() - 5 * HOUR),
         }));
@@ -116,7 +118,12 @@ export class DemoService {
       });
       await prisma.$transaction([
         prisma.tileVisit.createMany({ data: visits, skipDuplicates: true }),
-        prisma.ownedTile.createMany({ data: owned }),
+        // 다른 차가 이미 가진 칸은 건너뛴다(땅 한 칸에 주인 하나).
+        prisma.ownedTile.createMany({ data: owned, skipDuplicates: true }),
+        // 아래 지난 출근길 기록 5번(모두 80점 초과)을 칸별 주행 수에도 넣는다.
+        prisma.tileRecord.createMany({
+          data: known.map((id) => ({ vehicleId, ...parseTileId(id), goodTrips: scores.filter(isGoodTrip).length })),
+        }),
         prisma.vehicleTrip.createMany({ data: trips }),
         prisma.vehicle.update({ where: { id: vehicleId }, data: { credits: 120, safeStreak: 4, bestSafeStreak: 5 } }),
         prisma.creditLedger.create({ data: { vehicleId, amount: 120 - RULES.welcomeCredits, kind: "WELCOME", refId: "demo-seed" } }),

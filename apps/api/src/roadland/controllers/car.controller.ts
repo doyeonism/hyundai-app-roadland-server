@@ -50,7 +50,7 @@ export class CarController {
   @Get(R.TERRITORY)
   @UseGuards(VehicleGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: "지나간 땅·내 땅·특별 구간" })
+  @ApiOperation({ summary: "지나간 땅·내 땅" })
   territory(@VehicleId() vehicleId: string) {
     return this.game.territory(vehicleId);
   }
@@ -87,7 +87,7 @@ export class CarController {
   @Get(R.RECORDS)
   @UseGuards(VehicleGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: "안전 기록·특별 구간 수집" })
+  @ApiOperation({ summary: "안전 기록" })
   records(@VehicleId() vehicleId: string) {
     return this.game.records(vehicleId);
   }

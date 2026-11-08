@@ -3,8 +3,10 @@ import type { SubmitTripRequest, TileSegment } from "@template/shared";
 import { hexDistance, tileForLatLng } from "./hex";
 import {
   buyCost,
+  collectedUntil,
   daysAgo,
-  incomePerHour,
+  incomePerMinute,
+  isGoodTrip,
   isHomeRoute,
   pendingIncome,
   rejectReason,
@@ -16,11 +18,11 @@ import {
 
 // 차량 앱 HexGridTest.kt와 같은 값. 한쪽을 바꾸면 다른 쪽도 바꿔야 한다.
 const VECTORS: [number, number, string][] = [
-  [37.5446, 127.0559, "44406:20068"],
-  [37.4979, 127.0276, "44408:20039"],
-  [35.1796, 129.0756, "45997:18615"],
+  [37.5446, 127.0559, "532866:240816"],
+  [37.4979, 127.0276, "532896:240466"],
+  [35.1796, 129.0756, "551970:223377"],
   [0, 0, "0:0"],
-  [-33.8688, 151.2093, "73702:-17827"],
+  [-33.8688, 151.2093, "884427:-213931"],
 ];
 
 const seg = (id: string, o: Partial<TileSegment> = {}): TileSegment => ({
@@ -92,26 +94,48 @@ describe("rejectReason", () => {
 
 describe("땅과 방치 수익", () => {
   const today = "2026-11-02";
-  it("최근 7일 중 3일 이상 지나간 타일은 홈 루트이고 수익이 더 크다", () => {
-    const home = { level: 2, visitDays: [daysAgo(today, 1), daysAgo(today, 3), today] };
-    const plain = { level: 2, visitDays: [daysAgo(today, 1)] };
-    const old = { level: 2, visitDays: [daysAgo(today, 8), daysAgo(today, 9), daysAgo(today, 10)] };
-    expect(isHomeRoute(home, today)).toBe(true);
-    expect(isHomeRoute(old, today)).toBe(false);
-    expect(incomePerHour(home, today)).toBeGreaterThan(incomePerHour(plain, today));
+  it("최근 7일 중 3일 이상 지나간 타일은 홈 루트", () => {
+    expect(isHomeRoute({ visitDays: [daysAgo(today, 1), daysAgo(today, 3), today] }, today)).toBe(true);
+    expect(isHomeRoute({ visitDays: [daysAgo(today, 8), daysAgo(today, 9), daysAgo(today, 10)] }, today)).toBe(false);
   });
 
-  it("방치 수익은 상한 시간까지만 쌓인다", () => {
+  it("땅 수익은 1분마다 레벨 × (5 + 80점 넘은 주행 − 아닌 주행), 괄호는 최소 1", () => {
+    const tile = (level: number, goodTrips: number, badTrips: number) => ({ level, goodTrips, badTrips });
+    expect(incomePerMinute(tile(1, 0, 0))).toBe(5);
+    expect(incomePerMinute(tile(1, 3, 1))).toBe(7);
+    expect(incomePerMinute(tile(1, 0, 4))).toBe(1);
+    expect(incomePerMinute(tile(1, 0, 9))).toBe(1); // 최소 1
+    expect(incomePerMinute(tile(3, 2, 0))).toBe(3 * 7); // 레벨은 곱한다
+    expect(incomePerMinute(tile(0, 5, 0))).toBe(0); // 내 땅이 아니면 0
+    expect(isGoodTrip(81)).toBe(true);
+    expect(isGoodTrip(80)).toBe(false); // 80점은 넘지 못한 주행
+  });
+
+  it("쌓인 수익은 1분이 다 차야 들어오고, 상한 시간까지만 쌓인다", () => {
     const now = new Date("2026-11-02T12:00:00+09:00");
-    const tile = (h: number) => ({ level: 1, visitDays: [], collectedAt: new Date(now.getTime() - h * 3_600_000) });
-    expect(pendingIncome(tile(2), now)).toBe(2 * RULES.incomePerLevel);
-    expect(pendingIncome(tile(100), now)).toBe(pendingIncome(tile(RULES.idleCapHours), now));
-    expect(pendingIncome({ level: 0, visitDays: [], collectedAt: null }, now)).toBe(0);
+    const tile = (sec: number, level = 1) => ({ level, goodTrips: 0, badTrips: 0, collectedAt: new Date(now.getTime() - sec * 1000) });
+    expect(pendingIncome(tile(59), now)).toBe(0);
+    expect(pendingIncome(tile(60), now)).toBe(RULES.incomeBase);
+    expect(pendingIncome(tile(150, 3), now)).toBe(2 * 3 * RULES.incomeBase);
+    expect(pendingIncome(tile(100 * 3600), now)).toBe(RULES.idleCapHours * 60 * RULES.incomeBase);
+    expect(pendingIncome({ level: 0, goodTrips: 0, badTrips: 0, collectedAt: null }, now)).toBe(0);
   });
 
-  it("땅값은 가진 땅이 많을수록 오르고, 최고 레벨은 더 올릴 수 없다", () => {
-    expect(buyCost(10)).toBeGreaterThan(buyCost(0));
+  it("수령해도 아직 1분이 안 찬 몫은 다음으로 넘긴다", () => {
+    const now = new Date("2026-11-02T12:00:00+09:00");
+    const at = (sec: number) => new Date(now.getTime() - sec * 1000);
+    expect(collectedUntil(at(150), now)).toEqual(at(30)); // 2분 받고 30초 남김
+    expect(collectedUntil(at(30), now)).toEqual(at(30));
+    expect(collectedUntil(at(100 * 3600), now)).toEqual(now); // 상한에 닿았으면 지금부터
+  });
+
+  it("빈 땅은 5, 주인 있는 땅은 마지막 거래가 + 5. 최고 레벨은 더 올릴 수 없다", () => {
+    expect(buyCost(null)).toBe(5);
+    expect(buyCost(5)).toBe(10);
+    expect(buyCost(10)).toBe(15);
     expect(upgradeCost(1)).toBe(RULES.upgradeCostPerLevel);
+    expect(RULES.maxTileLevel).toBe(60);
+    expect(upgradeCost(RULES.maxTileLevel - 1)).toBe(RULES.upgradeCostPerLevel * (RULES.maxTileLevel - 1));
     expect(upgradeCost(RULES.maxTileLevel)).toBeNull();
   });
 

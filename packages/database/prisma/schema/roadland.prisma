@@ -15,6 +15,7 @@ model Vehicle {
 
   trips   VehicleTrip[]
   visits  TileVisit[]
+  records TileRecord[]
   tiles   OwnedTile[]
   ledger  CreditLedger[]
 
@@ -58,7 +59,7 @@ model VehicleTrip {
   @@map("vehicle_trips")
 }
 
-// 지나간 날짜별 기록. 살 수 있는 땅과 홈 루트(최근 7일 중 3일) 판정에 쓴다.
+// 지나간 날짜별 기록. 살 수 있는 땅(직접 지나간 칸)과 홈 루트(최근 7일 중 3일) 표시에 쓴다.
 model TileVisit {
   vehicleId String  @map("vehicle_id")
   vehicle   Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
@@ -71,11 +72,28 @@ model TileVisit {
   @@map("tile_visits")
 }
 
+// 차가 이 칸을 지나간 주행 수. 안전 점수 기준을 넘은 주행(good)과 아닌 주행(bad)을 따로 센다. 땅 수익 계산에 쓴다.
+model TileRecord {
+  vehicleId String  @map("vehicle_id")
+  vehicle   Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  q         Int
+  r         Int
+  goodTrips Int     @default(0) @map("good_trips")
+  badTrips  Int     @default(0) @map("bad_trips")
+
+  @@id([vehicleId, q, r])
+  @@map("tile_records")
+}
+
+// 땅 한 칸에는 주인이 하나뿐이다. 다른 차가 마지막 거래가보다 비싸게 사 가면 주인이 바뀐다.
 model OwnedTile {
-  vehicleId   String   @map("vehicle_id")
-  vehicle     Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
   q           Int
   r           Int
+  // 지금 주인
+  vehicleId   String   @map("vehicle_id")
+  vehicle     Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  // 마지막으로 거래된 가격. 다음 사람은 이보다 일정액 더 내야 살 수 있다.
+  price       Int
   level       Int      @default(1)
   // 마지막 방치 수익 수령 시각. 수익은 이 시각부터 요청 때 계산한다(타이머 없음).
   collectedAt DateTime @map("collected_at")
@@ -83,7 +101,8 @@ model OwnedTile {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  @@id([vehicleId, q, r])
+  @@id([q, r])
+  @@index([vehicleId])
   @@map("owned_tiles")
 }
 

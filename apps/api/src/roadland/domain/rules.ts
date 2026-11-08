@@ -6,8 +6,8 @@ import { hexDistance } from "./hex";
 export const RULES = {
   /** 처음 등록한 차량에 주는 크레딧. 첫 땅 하나를 바로 살 수 있게. */
   welcomeCredits: 100,
-  /** 안전하게 지나간 타일 한 칸의 크레딧. */
-  tileCredit: 10,
+  /** 안전하게 지나간 타일 한 칸(약 10m)의 크레딧. 1km에 대략 60~80칸. */
+  tileCredit: 2,
   /** 에코 모드·크루즈로 지나간 타일의 추가 비율. */
   assistBonus: 0.5,
   /** 차선 변경 때 깜빡이 사용률이 이 이상이면 매너 보너스. */
@@ -15,36 +15,46 @@ export const RULES = {
   mannerBonus: 0.2,
   /** 하루 주행으로 받는 크레딧 상한. 오래 달리는 것이 최적 전략이 되지 않게 한다. */
   dailyDriveCap: 400,
-  buyBaseCost: 30,
-  buyCostPerOwned: 5,
+  /** 주인 없는 땅의 값. */
+  buyBaseCost: 5,
+  /** 주인 있는 땅은 마지막 거래가보다 이만큼 더 내야 산다. 낸 돈은 누구에게도 가지 않는다. */
+  buyRaise: 5,
   upgradeCostPerLevel: 40,
-  maxTileLevel: 5,
-  incomePerLevel: 4, // 시간당
-  /** 최근 7일 중 이 일수 이상 지나간 타일은 홈 루트. */
+  maxTileLevel: 60,
+  /**
+   * 땅 한 칸이 1분마다 주는 크레딧 = 레벨 × (기본값 + 그 칸을 지나간 주행 중 안전 점수가 기준을 넘은 수 − 넘지 못한 수).
+   * 괄호 안은 최소 incomeMin.
+   */
+  incomeBase: 5,
+  incomeMin: 1,
+  incomeGoodScore: 80, // 이 점수를 넘으면 +1, 아니면 −1
+  /** 최근 7일 중 이 일수 이상 지나간 타일은 홈 루트(자주 다니는 길 표시). */
   homeRouteDays: 3,
-  homeRouteBonus: 1.5,
   /** 방치 수익이 쌓이는 최대 시간. 정기적인 탑승과 수령을 유도한다. */
   idleCapHours: 12,
   /** 안전 연속 기록으로 치는 점수. */
   safeStreakScore: 90,
   /** 기록 검증: 이보다 빠른 평균 속도나 거리 대비 너무 많은 타일은 보상하지 않는다. */
   maxAvgKph: 200,
-  maxTilesPerKm: 12,
+  maxTilesPerKm: 150,
   /** 이어지는 두 타일 사이가 이 칸 수보다 멀면 위치가 튄 것으로 본다. 이런 구간이 많으면 거부. */
   maxStepTiles: 3,
   maxJumps: 2,
-  /** 한 번에 받는 타일 수 상한(요청 크기 제한). */
-  maxTilesPerTrip: 2000,
+  /** 한 번에 받는 타일 수 상한(요청 크기 제한). 10m 타일로 약 200km. */
+  maxTilesPerTrip: 20000,
 } as const;
 
 const HOUR = 3_600_000;
+const MINUTE = 60_000;
 
 export interface TileState {
   id: string;
   visitDays: string[];
   level: number;
   collectedAt: Date | null;
-  special: string | null;
+  /** 내가 이 칸을 지나간 주행 중 안전 점수 기준을 넘은 수와 넘지 못한 수. */
+  goodTrips: number;
+  badTrips: number;
 }
 
 /** 서울 기준 날짜 YYYY-MM-DD. */
@@ -110,21 +120,42 @@ export function isHomeRoute(tile: Pick<TileState, "visitDays">, today: string) {
   return tile.visitDays.filter((d) => d >= since && d <= today).length >= RULES.homeRouteDays;
 }
 
-export function incomePerHour(tile: Pick<TileState, "level" | "visitDays">, today: string) {
+/** 주행 안전 점수가 땅 수익에 더해지는(넘으면) 쪽인지. */
+export function isGoodTrip(safetyScore: number) {
+  return safetyScore > RULES.incomeGoodScore;
+}
+
+/** 이 땅이 1분마다 주는 크레딧. 레벨 × max(최소, 기본 + 좋은 주행 − 나쁜 주행). */
+export function incomePerMinute(tile: Pick<TileState, "level" | "goodTrips" | "badTrips">) {
   if (tile.level <= 0) return 0;
-  const base = RULES.incomePerLevel * tile.level;
-  return Math.round(isHomeRoute(tile, today) ? base * RULES.homeRouteBonus : base);
+  return tile.level * Math.max(RULES.incomeMin, RULES.incomeBase + tile.goodTrips - tile.badTrips);
 }
 
-/** 마지막 수령 뒤 쌓인 수익. 상한 시간까지만 쌓인다. */
-export function pendingIncome(tile: Pick<TileState, "level" | "visitDays" | "collectedAt">, now: Date) {
+/** 마지막 수령 뒤 다 채운 분 수. 상한 시간까지만 센다. */
+function paidMinutes(collectedAt: Date, now: Date) {
+  const minutes = Math.floor(Math.max(0, now.getTime() - collectedAt.getTime()) / MINUTE);
+  return Math.min(minutes, RULES.idleCapHours * 60);
+}
+
+/** 마지막 수령 뒤 쌓인 수익. 1분이 다 차야 들어오고, 상한 시간까지만 쌓인다. */
+export function pendingIncome(tile: Pick<TileState, "level" | "goodTrips" | "badTrips" | "collectedAt">, now: Date) {
   if (tile.level <= 0 || !tile.collectedAt) return 0;
-  const hours = Math.min(RULES.idleCapHours, Math.max(0, (now.getTime() - tile.collectedAt.getTime()) / HOUR));
-  return Math.floor(incomePerHour(tile, seoulDay(now)) * hours);
+  return incomePerMinute(tile) * paidMinutes(tile.collectedAt, now);
 }
 
-export function buyCost(ownedCount: number) {
-  return RULES.buyBaseCost + RULES.buyCostPerOwned * ownedCount;
+/**
+ * 수령한 뒤의 새 기준 시각. 아직 1분이 안 찬 몫은 남겨 다음 수령에 넘긴다.
+ * 상한까지 쌓였으면 그 뒤로는 쌓이지 않았으므로 지금부터 다시 센다.
+ */
+export function collectedUntil(collectedAt: Date, now: Date) {
+  const minutes = paidMinutes(collectedAt, now);
+  if (minutes >= RULES.idleCapHours * 60) return now;
+  return new Date(collectedAt.getTime() + minutes * MINUTE);
+}
+
+/** 살 때 내는 값. 주인 없는 땅은 기본값, 주인 있는 땅은 마지막 거래가 + 인상분. */
+export function buyCost(lastPrice: number | null) {
+  return lastPrice === null ? RULES.buyBaseCost : lastPrice + RULES.buyRaise;
 }
 
 export function upgradeCost(level: number) {

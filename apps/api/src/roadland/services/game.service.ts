@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from "@nestjs/common";
+import { BadRequestException, ConflictException, Injectable } from "@nestjs/common";
 import { Prisma, prisma, type VehicleTrip } from "@template/database";
 import type {
   CarHomeResponse,
@@ -13,24 +13,42 @@ import type {
 } from "@template/shared";
 
 import { parseTileId, tileId } from "../domain/hex";
-import { SPECIAL_BY_ID, SPECIALS } from "../domain/places";
 import {
   buyCost,
-  incomePerHour,
+  collectedUntil,
+  incomePerMinute,
+  isGoodTrip,
   isHomeRoute,
   pendingIncome,
   rejectReason,
   RULES,
   seoulDay,
   tripCredits,
-  upgradeCost,
   type TileState,
+  upgradeCost,
 } from "../domain/rules";
 import { ClockService } from "./clock.service";
 import { RankingService } from "./ranking.service";
 import { VehicleLockService } from "./vehicle-lock.service";
 
 type Db = Prisma.TransactionClient;
+
+/** 차 한 대가 보는 타일 상태. 주인이 다른 차면 level 은 0(내 땅 아님)이고 price 만 의미가 있다. */
+interface TileInfo extends TileState {
+  /** 지금 주인. 없으면 null. */
+  ownerId: string | null;
+  /** 마지막 거래가. 주인이 없으면 null. */
+  price: number | null;
+}
+
+interface OwnedRow {
+  q: number;
+  r: number;
+  vehicle_id: string;
+  price: number;
+  level: number;
+  collected_at: Date;
+}
 
 /** 차가 보낸 종료 시각이 서버 시각보다 이만큼 넘게 미래면 받지 않는다. */
 const FUTURE_SKEW_MS = 5 * 60_000;
@@ -62,7 +80,7 @@ export class GameService {
     return {
       credits: vehicle.credits,
       pendingIncome: owned.reduce((n, t) => n + t.pending, 0),
-      incomePerHour: owned.reduce((n, t) => n + t.incomePerHour, 0),
+      incomePerMinute: owned.reduce((n, t) => n + t.incomePerMinute, 0),
       idleCapHours: RULES.idleCapHours,
       ownedTiles: owned.length,
       buyableTiles: tiles.filter((t) => t.buyCost !== null).length,
@@ -79,7 +97,7 @@ export class GameService {
   }
 
   async records(vehicleId: string): Promise<CarRecordsResponse> {
-    const [vehicle, trips, owned, specialVisits] = await Promise.all([
+    const [vehicle, trips, owned] = await Promise.all([
       prisma.vehicle.findUniqueOrThrow({ where: { id: vehicleId } }),
       prisma.vehicleTrip.findMany({
         where: { vehicleId, rejected: false },
@@ -88,19 +106,12 @@ export class GameService {
         select: { safetyScore: true },
       }),
       prisma.ownedTile.count({ where: { vehicleId } }),
-      prisma.tileVisit.findMany({
-        where: { vehicleId, OR: SPECIALS.map((s) => parseTileId(s.id)) },
-        distinct: ["q", "r"],
-        select: { q: true, r: true },
-      }),
     ]);
-    const seen = new Set(specialVisits.map((v) => tileId(v.q, v.r)));
     return {
       safeStreak: vehicle.safeStreak,
       bestSafeStreak: vehicle.bestSafeStreak,
       recentScores: trips.map((t) => t.safetyScore).reverse(),
       ownedTiles: owned,
-      specials: SPECIALS.map((s) => ({ id: s.id, name: s.name, collected: seen.has(s.id) })),
     };
   }
 
@@ -167,6 +178,15 @@ export class GameService {
         data: axial.map(({ q, r }) => ({ vehicleId, q, r, day })),
         skipDuplicates: true,
       });
+      // 땅 수익에 쓰는 칸별 주행 수. 안전 점수 기준을 넘은 주행과 아닌 주행을 따로 더한다.
+      const good = isGoodTrip(input.safetyScore) ? 1 : 0;
+      await tx.$executeRaw`
+        INSERT INTO tile_records (vehicle_id, q, r, good_trips, bad_trips)
+        SELECT ${vehicleId}, t.q, t.r, ${good}, ${1 - good}
+        FROM unnest(${axial.map((a) => a.q)}::int[], ${axial.map((a) => a.r)}::int[]) AS t(q, r)
+        ON CONFLICT (vehicle_id, q, r) DO UPDATE SET
+          good_trips = tile_records.good_trips + EXCLUDED.good_trips,
+          bad_trips = tile_records.bad_trips + EXCLUDED.bad_trips`;
     }
 
     const trip = await tx.vehicleTrip.create({
@@ -219,20 +239,59 @@ export class GameService {
 
   // --- 땅 --------------------------------------------------------------------
 
+  /**
+   * 땅을 산다. 주인 없는 땅은 기본값, 다른 차의 땅은 마지막 거래가 + 인상분을 낸다(낸 돈은 아무에게도 가지 않는다).
+   * 빼앗길 때 이전 주인은 그 땅에 쌓인 수익을 먼저 받고, 땅은 레벨 1로 넘어간다.
+   */
   async buy(vehicleId: string, id: string): Promise<LandTileView> {
-    return this.lock.run(vehicleId, async () => {
+    const key = parseTileId(id);
+    // 이전 주인도 함께 잠가야 그 차의 수령·업그레이드와 겹치지 않는다. 잠근 뒤 주인이 그대로인지 다시 본다.
+    const seen = await prisma.ownedTile.findUnique({ where: { q_r: key }, select: { vehicleId: true } });
+    const prevOwner = seen && seen.vehicleId !== vehicleId ? seen.vehicleId : null;
+    const view = await this.lock.runAll([vehicleId, ...(prevOwner ? [prevOwner] : [])], async () => {
       const now = await this.clock.now(vehicleId);
-      const view = await prisma.$transaction(async (tx) => {
-        const tile = (await this.views(tx, vehicleId, now)).find((t) => t.id === id);
-        if (!tile || tile.buyCost === null) throw new BadRequestException("지나간 적 있는 빈 땅만 살 수 있어요");
-        const cost = tile.buyCost;
-        await this.spend(tx, vehicleId, cost, "BUY", id);
-        await tx.ownedTile.create({ data: { vehicleId, ...parseTileId(id), level: 1, collectedAt: now } });
-        return this.view(tx, vehicleId, id, now);
-      });
-      await this.refreshLand(vehicleId);
-      return view;
+      try {
+        return await prisma.$transaction(async (tx) => {
+          const tile = (await this.tiles(tx, vehicleId)).get(id);
+          if (!tile || tile.visitDays.length === 0) throw new BadRequestException("직접 지나간 땅만 살 수 있어요");
+          if (tile.ownerId === vehicleId) throw new BadRequestException("이미 내 땅이에요");
+          if (tile.ownerId !== prevOwner) throw new ConflictException("방금 주인이 바뀌었어요. 다시 확인해 주세요");
+          const cost = buyCost(tile.price);
+          await this.spend(tx, vehicleId, cost, "BUY", id);
+          if (tile.ownerId === null || tile.price === null) {
+            await tx.ownedTile.create({ data: { ...key, vehicleId, price: cost, level: 1, collectedAt: now } });
+          } else {
+            const owned = await tx.ownedTile.findUniqueOrThrow({ where: { q_r: key } });
+            const record = await tx.tileRecord.findUnique({ where: { vehicleId_q_r: { vehicleId: owned.vehicleId, ...key } } });
+            const pending = pendingIncome(
+              {
+                level: owned.level,
+                collectedAt: owned.collectedAt,
+                goodTrips: record?.goodTrips ?? 0,
+                badTrips: record?.badTrips ?? 0,
+              },
+              await this.clock.now(owned.vehicleId),
+            );
+            if (pending > 0) await this.earn(tx, owned.vehicleId, pending, "COLLECT", id);
+            const { count } = await tx.ownedTile.updateMany({
+              where: { ...key, vehicleId: owned.vehicleId, price: tile.price },
+              data: { vehicleId, price: cost, level: 1, collectedAt: now },
+            });
+            if (count === 0) throw new ConflictException("방금 주인이 바뀌었어요. 다시 확인해 주세요");
+          }
+          return this.view(tx, vehicleId, id, now);
+        });
+      } catch (e) {
+        // 주인 없는 땅을 다른 차가 같은 순간에 먼저 샀다.
+        if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+          throw new ConflictException("다른 차가 먼저 샀어요. 다시 확인해 주세요");
+        }
+        throw e;
+      }
     });
+    await this.refreshLand(vehicleId);
+    if (prevOwner) await this.refreshLand(prevOwner);
+    return view;
   }
 
   async upgrade(vehicleId: string, id: string): Promise<LandTileView> {
@@ -244,9 +303,9 @@ export class GameService {
         // 올리기 전까지 쌓인 수익은 먼저 받는다(레벨이 바뀌어 계산이 꼬이지 않게).
         if (tile.pending > 0) await this.earn(tx, vehicleId, tile.pending, "COLLECT", id);
         await this.spend(tx, vehicleId, tile.upgradeCost, "UPGRADE", id);
-        await tx.ownedTile.update({
-          where: { vehicleId_q_r: { vehicleId, ...parseTileId(id) } },
-          data: { level: { increment: 1 }, collectedAt: now },
+        await tx.ownedTile.updateMany({
+          where: { vehicleId, ...parseTileId(id) },
+          data: { level: { increment: 1 }, collectedAt: collectedUntil(new Date(tile.collectedAt!), now) },
         });
         return this.view(tx, vehicleId, id, now);
       });
@@ -262,7 +321,15 @@ export class GameService {
       return prisma.$transaction(async (tx) => {
         const owned = (await this.views(tx, vehicleId, now)).filter((t) => t.owned);
         const collected = owned.reduce((n, t) => n + t.pending, 0);
-        await tx.ownedTile.updateMany({ where: { vehicleId }, data: { collectedAt: now } });
+        // 땅마다 다 찬 분만큼만 기준 시각을 옮긴다(1분이 안 찬 몫은 남긴다). 같은 시각끼리 묶어 갱신한다.
+        const groups = new Map<number, { q: number; r: number }[]>();
+        for (const t of owned) {
+          const until = collectedUntil(new Date(t.collectedAt!), now).getTime();
+          groups.set(until, [...(groups.get(until) ?? []), parseTileId(t.id)]);
+        }
+        for (const [until, keys] of groups) {
+          await tx.ownedTile.updateMany({ where: { vehicleId, OR: keys }, data: { collectedAt: new Date(until) } });
+        }
         if (collected > 0) await this.earn(tx, vehicleId, collected, "COLLECT", null);
         const { credits } = await tx.vehicle.findUniqueOrThrow({ where: { id: vehicleId }, select: { credits: true } });
         return { collected, credits };
@@ -293,35 +360,41 @@ export class GameService {
 
   // --- 타일 상태 ---------------------------------------------------------------
 
-  /** 지나간 적이 있거나 내 땅이거나 특별 구간인 타일. */
-  private async tiles(db: Db, vehicleId: string): Promise<Map<string, TileState>> {
-    const [visits, owned] = await Promise.all([
+  /** 이 차가 지나간 적이 있거나 이 차의 땅인 타일. 지나간 칸에 다른 차가 주인이면 그 거래가도 붙인다. */
+  private async tiles(db: Db, vehicleId: string): Promise<Map<string, TileInfo>> {
+    const [visits, records, owned] = await Promise.all([
       db.tileVisit.findMany({ where: { vehicleId }, select: { q: true, r: true, day: true }, orderBy: { day: "asc" } }),
-      db.ownedTile.findMany({ where: { vehicleId } }),
+      db.tileRecord.findMany({ where: { vehicleId } }),
+      db.$queryRaw<OwnedRow[]>`
+        SELECT o.q, o.r, o.vehicle_id, o.price, o.level, o.collected_at FROM owned_tiles o
+        WHERE o.vehicle_id = ${vehicleId}
+           OR EXISTS (SELECT 1 FROM tile_visits v WHERE v.vehicle_id = ${vehicleId} AND v.q = o.q AND v.r = o.r)`,
     ]);
-    const map = new Map<string, TileState>();
+    const map = new Map<string, TileInfo>();
     const get = (id: string) => {
       let t = map.get(id);
       if (!t) {
-        t = { id, visitDays: [], level: 0, collectedAt: null, special: SPECIAL_BY_ID.get(id) ?? null };
+        t = { id, visitDays: [], level: 0, collectedAt: null, goodTrips: 0, badTrips: 0, ownerId: null, price: null };
         map.set(id, t);
       }
       return t;
     };
     for (const v of visits) get(tileId(v.q, v.r)).visitDays.push(v.day);
+    for (const r of records) Object.assign(get(tileId(r.q, r.r)), { goodTrips: r.goodTrips, badTrips: r.badTrips });
     for (const o of owned) {
       const t = get(tileId(o.q, o.r));
-      t.level = o.level;
-      t.collectedAt = o.collectedAt;
+      t.ownerId = o.vehicle_id;
+      t.price = o.price;
+      if (o.vehicle_id === vehicleId) {
+        t.level = o.level;
+        t.collectedAt = o.collected_at;
+      }
     }
-    for (const s of SPECIALS) get(s.id);
     return map;
   }
 
   private async views(db: Db, vehicleId: string, now: Date): Promise<LandTileView[]> {
-    const tiles = [...(await this.tiles(db, vehicleId)).values()];
-    const ownedCount = tiles.filter((t) => t.level > 0).length;
-    return tiles.map((t) => toView(t, ownedCount, now));
+    return [...(await this.tiles(db, vehicleId)).values()].map((t) => toView(t, vehicleId, now));
   }
 
   private async view(db: Db, vehicleId: string, id: string, now: Date) {
@@ -350,21 +423,23 @@ export class GameService {
   }
 }
 
-function toView(t: TileState, ownedCount: number, now: Date): LandTileView {
-  const today = seoulDay(now);
-  const owned = t.level > 0;
+function toView(t: TileInfo, vehicleId: string, now: Date): LandTileView {
+  const owned = t.ownerId === vehicleId;
   const visited = t.visitDays.length > 0;
   return {
     id: t.id,
     visitDays: t.visitDays,
     level: t.level,
     collectedAt: t.collectedAt?.toISOString() ?? null,
-    special: t.special,
     owned,
-    homeRoute: isHomeRoute(t, today),
-    incomePerHour: incomePerHour(t, today),
+    ownedByOther: t.ownerId !== null && !owned,
+    price: t.price,
+    homeRoute: isHomeRoute(t, seoulDay(now)),
+    goodTrips: t.goodTrips,
+    badTrips: t.badTrips,
+    incomePerMinute: incomePerMinute(t),
     pending: pendingIncome(t, now),
-    buyCost: !owned && visited ? buyCost(ownedCount) : null,
+    buyCost: !owned && visited ? buyCost(t.price) : null,
     upgradeCost: owned ? upgradeCost(t.level) : null,
   };
 }
