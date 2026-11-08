@@ -185,7 +185,8 @@ describe("Roadland car API (e2e)", () => {
 
     // 지나가지 않은 땅은 못 산다.
     await request(server()).post(`${CAR}/tiles/${target}/buy`).set(as(other.token)).expect(400);
-    await request(server()).post(`${CAR}/trips`).set(as(other.token)).send(trip()).expect(201);
+    // 내가 산 뒤에 지나간 주행이어야 한다(종료 시각이 거래 뒤).
+    await request(server()).post(`${CAR}/trips`).set(as(other.token)).send(trip({ endedAt: new Date().toISOString() })).expect(201);
 
     // 내 시계를 1시간 앞당겨 그 땅에 수익을 쌓아 둔다.
     await request(server()).post(`${CAR}/dev/vehicles/${vehicleId}/advance`).send({ hours: 1 }).expect(200);
@@ -201,7 +202,13 @@ describe("Roadland car API (e2e)", () => {
     const mineAfter = await get<CarHomeResponse>("/home");
     expect(mineAfter.credits).toBe(mineBefore.credits + 60 * 2 * rate);
     const view = (await get<TerritoryResponse>("/territory")).tiles.find((t) => t.id === target)!;
-    expect(view).toMatchObject({ owned: false, ownedByOther: true, level: 0, price: 10, buyCost: 15 });
+    // 예전에 지나간 기록은 거래 전이라 다시 지나가야 살 수 있다.
+    expect(view).toMatchObject({ owned: false, ownedByOther: true, level: 0, price: 10, buyCost: null, mustRevisit: true });
+    const refused = await request(server()).post(`${CAR}/tiles/${target}/buy`).set(auth()).expect(400);
+    expect((refused.body as Body<unknown>).message).toBe("주인이 바뀐 뒤에 다시 지나가야 살 수 있어요");
+    await post<TripResult>("/trips", trip(), 201);
+    const again = (await get<TerritoryResponse>("/territory")).tiles.find((t) => t.id === target)!;
+    expect(again).toMatchObject({ mustRevisit: false, buyCost: 15 });
 
     // 다시 빼앗으면 15. 낸 돈은 누구에게도 가지 않는다.
     const otherBefore = otherHome.data.credits;

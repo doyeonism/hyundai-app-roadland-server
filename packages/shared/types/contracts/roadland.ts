@@ -58,6 +58,8 @@ export interface LandTileView {
   ownedByOther: boolean;
   /** 마지막 거래가. 주인이 없으면 null. */
   price: number | null;
+  /** 지나간 적은 있지만 마지막 거래 전이라, 다시 지나가야 살 수 있는지. */
+  mustRevisit: boolean;
   homeRoute: boolean;
   /** 내가 이 칸을 지나간 주행 중 안전 점수 기준을 넘은 수와 넘지 못한 수. */
   goodTrips: number;

@@ -122,7 +122,12 @@ export class DemoService {
         prisma.ownedTile.createMany({ data: owned, skipDuplicates: true }),
         // 아래 지난 출근길 기록 5번(모두 80점 초과)을 칸별 주행 수에도 넣는다.
         prisma.tileRecord.createMany({
-          data: known.map((id) => ({ vehicleId, ...parseTileId(id), goodTrips: scores.filter(isGoodTrip).length })),
+          data: known.map((id) => ({
+            vehicleId,
+            ...parseTileId(id),
+            goodTrips: scores.filter(isGoodTrip).length,
+            lastPassedAt: trips[trips.length - 1].endedAt,
+          })),
         }),
         prisma.vehicleTrip.createMany({ data: trips }),
         prisma.vehicle.update({ where: { id: vehicleId }, data: { credits: 120, safeStreak: 4, bestSafeStreak: 5 } }),

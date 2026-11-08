@@ -80,6 +80,8 @@ model TileRecord {
   r         Int
   goodTrips Int     @default(0) @map("good_trips")
   badTrips  Int     @default(0) @map("bad_trips")
+  // 마지막으로 이 칸을 지나간 시각(주행 종료 시각). 주인이 바뀐 뒤 다시 지나가야 살 수 있어서 쓴다.
+  lastPassedAt DateTime? @map("last_passed_at")
 
   @@id([vehicleId, q, r])
   @@map("tile_records")
@@ -94,6 +96,8 @@ model OwnedTile {
   vehicle     Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
   // 마지막으로 거래된 가격. 다음 사람은 이보다 일정액 더 내야 살 수 있다.
   price       Int
+  // 마지막으로 거래된 시각. 그 전에 지나간 기록으로는 살 수 없다.
+  tradedAt    DateTime @default(now()) @map("traded_at")
   level       Int      @default(1)
   // 마지막 방치 수익 수령 시각. 수익은 이 시각부터 요청 때 계산한다(타이머 없음).
   collectedAt DateTime @map("collected_at")

@@ -39,6 +39,9 @@ interface TileInfo extends TileState {
   ownerId: string | null;
   /** 마지막 거래가. 주인이 없으면 null. */
   price: number | null;
+  /** 마지막 거래 시각과 내가 마지막으로 지나간 시각. 주인이 있으면 거래 뒤에 지나가야 살 수 있다. */
+  tradedAt: Date | null;
+  lastPassedAt: Date | null;
 }
 
 interface OwnedRow {
@@ -48,6 +51,7 @@ interface OwnedRow {
   price: number;
   level: number;
   collected_at: Date;
+  traded_at: Date;
 }
 
 /** 차가 보낸 종료 시각이 서버 시각보다 이만큼 넘게 미래면 받지 않는다. */
@@ -178,15 +182,17 @@ export class GameService {
         data: axial.map(({ q, r }) => ({ vehicleId, q, r, day })),
         skipDuplicates: true,
       });
-      // 땅 수익에 쓰는 칸별 주행 수. 안전 점수 기준을 넘은 주행과 아닌 주행을 따로 더한다.
+      // 땅 수익에 쓰는 칸별 주행 수(안전 점수 기준을 넘은 주행과 아닌 주행)와 마지막으로 지나간 시각.
       const good = isGoodTrip(input.safetyScore) ? 1 : 0;
+      const passedAt = new Date(endedAt.getTime() + shift);
       await tx.$executeRaw`
-        INSERT INTO tile_records (vehicle_id, q, r, good_trips, bad_trips)
-        SELECT ${vehicleId}, t.q, t.r, ${good}, ${1 - good}
+        INSERT INTO tile_records (vehicle_id, q, r, good_trips, bad_trips, last_passed_at)
+        SELECT ${vehicleId}, t.q, t.r, ${good}, ${1 - good}, ${passedAt}
         FROM unnest(${axial.map((a) => a.q)}::int[], ${axial.map((a) => a.r)}::int[]) AS t(q, r)
         ON CONFLICT (vehicle_id, q, r) DO UPDATE SET
           good_trips = tile_records.good_trips + EXCLUDED.good_trips,
-          bad_trips = tile_records.bad_trips + EXCLUDED.bad_trips`;
+          bad_trips = tile_records.bad_trips + EXCLUDED.bad_trips,
+          last_passed_at = GREATEST(tile_records.last_passed_at, EXCLUDED.last_passed_at)`;
     }
 
     const trip = await tx.vehicleTrip.create({
@@ -256,10 +262,11 @@ export class GameService {
           if (!tile || tile.visitDays.length === 0) throw new BadRequestException("직접 지나간 땅만 살 수 있어요");
           if (tile.ownerId === vehicleId) throw new BadRequestException("이미 내 땅이에요");
           if (tile.ownerId !== prevOwner) throw new ConflictException("방금 주인이 바뀌었어요. 다시 확인해 주세요");
+          if (mustRevisit(tile)) throw new BadRequestException("주인이 바뀐 뒤에 다시 지나가야 살 수 있어요");
           const cost = buyCost(tile.price);
           await this.spend(tx, vehicleId, cost, "BUY", id);
           if (tile.ownerId === null || tile.price === null) {
-            await tx.ownedTile.create({ data: { ...key, vehicleId, price: cost, level: 1, collectedAt: now } });
+            await tx.ownedTile.create({ data: { ...key, vehicleId, price: cost, level: 1, collectedAt: now, tradedAt: now } });
           } else {
             const owned = await tx.ownedTile.findUniqueOrThrow({ where: { q_r: key } });
             const record = await tx.tileRecord.findUnique({ where: { vehicleId_q_r: { vehicleId: owned.vehicleId, ...key } } });
@@ -275,7 +282,7 @@ export class GameService {
             if (pending > 0) await this.earn(tx, owned.vehicleId, pending, "COLLECT", id);
             const { count } = await tx.ownedTile.updateMany({
               where: { ...key, vehicleId: owned.vehicleId, price: tile.price },
-              data: { vehicleId, price: cost, level: 1, collectedAt: now },
+              data: { vehicleId, price: cost, level: 1, collectedAt: now, tradedAt: now },
             });
             if (count === 0) throw new ConflictException("방금 주인이 바뀌었어요. 다시 확인해 주세요");
           }
@@ -366,7 +373,7 @@ export class GameService {
       db.tileVisit.findMany({ where: { vehicleId }, select: { q: true, r: true, day: true }, orderBy: { day: "asc" } }),
       db.tileRecord.findMany({ where: { vehicleId } }),
       db.$queryRaw<OwnedRow[]>`
-        SELECT o.q, o.r, o.vehicle_id, o.price, o.level, o.collected_at FROM owned_tiles o
+        SELECT o.q, o.r, o.vehicle_id, o.price, o.level, o.collected_at, o.traded_at FROM owned_tiles o
         WHERE o.vehicle_id = ${vehicleId}
            OR EXISTS (SELECT 1 FROM tile_visits v WHERE v.vehicle_id = ${vehicleId} AND v.q = o.q AND v.r = o.r)`,
     ]);
@@ -374,17 +381,31 @@ export class GameService {
     const get = (id: string) => {
       let t = map.get(id);
       if (!t) {
-        t = { id, visitDays: [], level: 0, collectedAt: null, goodTrips: 0, badTrips: 0, ownerId: null, price: null };
+        t = {
+          id,
+          visitDays: [],
+          level: 0,
+          collectedAt: null,
+          goodTrips: 0,
+          badTrips: 0,
+          ownerId: null,
+          price: null,
+          tradedAt: null,
+          lastPassedAt: null,
+        };
         map.set(id, t);
       }
       return t;
     };
     for (const v of visits) get(tileId(v.q, v.r)).visitDays.push(v.day);
-    for (const r of records) Object.assign(get(tileId(r.q, r.r)), { goodTrips: r.goodTrips, badTrips: r.badTrips });
+    for (const r of records) {
+      Object.assign(get(tileId(r.q, r.r)), { goodTrips: r.goodTrips, badTrips: r.badTrips, lastPassedAt: r.lastPassedAt });
+    }
     for (const o of owned) {
       const t = get(tileId(o.q, o.r));
       t.ownerId = o.vehicle_id;
       t.price = o.price;
+      t.tradedAt = o.traded_at;
       if (o.vehicle_id === vehicleId) {
         t.level = o.level;
         t.collectedAt = o.collected_at;
@@ -423,9 +444,16 @@ export class GameService {
   }
 }
 
+/** 다른 차의 땅인데, 내가 마지막으로 지나간 때가 마지막 거래보다 앞이라 다시 지나가야 하는지. */
+function mustRevisit(t: TileInfo) {
+  if (t.ownerId === null || t.tradedAt === null) return false;
+  return t.lastPassedAt === null || t.lastPassedAt <= t.tradedAt;
+}
+
 function toView(t: TileInfo, vehicleId: string, now: Date): LandTileView {
   const owned = t.ownerId === vehicleId;
   const visited = t.visitDays.length > 0;
+  const revisit = !owned && mustRevisit(t);
   return {
     id: t.id,
     visitDays: t.visitDays,
@@ -439,7 +467,8 @@ function toView(t: TileInfo, vehicleId: string, now: Date): LandTileView {
     badTrips: t.badTrips,
     incomePerMinute: incomePerMinute(t),
     pending: pendingIncome(t, now),
-    buyCost: !owned && visited ? buyCost(t.price) : null,
+    mustRevisit: visited && revisit,
+    buyCost: !owned && visited && !revisit ? buyCost(t.price) : null,
     upgradeCost: owned ? upgradeCost(t.level) : null,
   };
 }
