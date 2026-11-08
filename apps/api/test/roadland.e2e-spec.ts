@@ -140,7 +140,7 @@ describe("Roadland car API (e2e)", () => {
     await prisma.vehicle.update({ where: { id: vehicleId }, data: { credits: 500 } });
   });
 
-  it("같은 땅을 동시에 사도 한 번만 산다", async () => {
+  it("같은 땅을 동시에 사도 한 번만 사고, 빈 땅값은 가진 땅마다 5씩 오른다", async () => {
     const id = commute[2];
     const codes = await Promise.all(
       [0, 1, 2].map(async () => (await request(server()).post(`${CAR}/tiles/${id}/buy`).set(auth())).status),
@@ -148,27 +148,29 @@ describe("Roadland car API (e2e)", () => {
     expect(codes.filter((c) => c === 200)).toHaveLength(1);
     const territory = await get<TerritoryResponse>("/territory");
     expect(territory.tiles.filter((t) => t.owned)).toHaveLength(2);
+    const next = territory.tiles.find((t) => !t.owned && !t.ownedByOther && t.buyCost !== null)!;
+    expect(next.buyCost).toBe(RULES.buyBaseCost * 3); // 두 칸을 가졌으니 세 번째는 15
   });
 
-  // 80점 넘은 주행이 한 번 지나간 칸이라 레벨 1 기준 1분에 5 + 1.
+  // 80점 넘은 주행이 한 번 지나간 칸이라 레벨 1 기준 1시간에 5 + 1.
   const rate = RULES.incomeBase + 1;
 
-  it("내 땅은 1분마다 레벨 × (5 + 주행 점수 보정)을 벌고, 업그레이드는 쌓인 수익을 먼저 준다", async () => {
+  it("내 땅은 1시간마다 레벨 × (5 + 주행 점수 보정)을 벌고, 업그레이드는 쌓인 수익을 먼저 준다", async () => {
     await request(server()).post(`${CAR}/dev/vehicles/${vehicleId}/advance`).send({ hours: 2 }).expect(200);
     const home = await get<CarHomeResponse>("/home");
-    expect(home.incomePerMinute).toBe(2 * rate);
-    expect(home.pendingIncome).toBe(2 * 120 * rate);
+    expect(home.incomePerHour).toBe(2 * rate);
+    expect(home.pendingIncome).toBe(2 * 2 * rate); // 두 칸 × 2시간
 
     const before = home.credits;
     const tile = await post<LandTileView>(`/tiles/${commute[0]}/upgrade`);
     expect(tile.level).toBe(2);
     expect(tile.pending).toBe(0);
     const after = await get<CarHomeResponse>("/home");
-    expect(after.credits).toBe(before + 120 * rate - RULES.upgradeCostPerLevel);
+    expect(after.credits).toBe(before + 2 * rate - RULES.upgradeCostBase);
 
     await request(server()).post(`${CAR}/dev/vehicles/${vehicleId}/advance`).send({ hours: 24 }).expect(200);
     const c = await post<CollectResponse>("/collect");
-    expect(c.collected).toBe(RULES.idleCapHours * 60 * (2 + 1) * rate);
+    expect(c.collected).toBe(RULES.idleCapHours * (2 + 1) * rate);
     expect((await get<CarHomeResponse>("/home")).pendingIncome).toBe(0);
   });
 
@@ -198,9 +200,9 @@ describe("Roadland car API (e2e)", () => {
     const otherHome = (await request(server()).get(`${CAR}/home`).set(as(other.token)).expect(200)).body as Body<CarHomeResponse>;
     expect(otherHome.data.credits).toBe(RULES.welcomeCredits + otherHome.data.latestTrip!.credits - 10);
 
-    // 나는 그 땅(레벨 2)에 쌓인 60분 수익을 받고, 땅은 다른 차 것으로 보인다.
+    // 나는 그 땅(레벨 2)에 쌓인 1시간 수익을 받고, 땅은 다른 차 것으로 보인다.
     const mineAfter = await get<CarHomeResponse>("/home");
-    expect(mineAfter.credits).toBe(mineBefore.credits + 60 * 2 * rate);
+    expect(mineAfter.credits).toBe(mineBefore.credits + 2 * rate);
     const view = (await get<TerritoryResponse>("/territory")).tiles.find((t) => t.id === target)!;
     // 예전에 지나간 기록은 거래 전이라 다시 지나가야 살 수 있다.
     expect(view).toMatchObject({ owned: false, ownedByOther: true, level: 0, price: 10, buyCost: null, mustRevisit: true });

@@ -16,7 +16,7 @@ import { parseTileId, tileId } from "../domain/hex";
 import {
   buyCost,
   collectedUntil,
-  incomePerMinute,
+  incomePerHour,
   isGoodTrip,
   isHomeRoute,
   pendingIncome,
@@ -84,7 +84,7 @@ export class GameService {
     return {
       credits: vehicle.credits,
       pendingIncome: owned.reduce((n, t) => n + t.pending, 0),
-      incomePerMinute: owned.reduce((n, t) => n + t.incomePerMinute, 0),
+      incomePerHour: owned.reduce((n, t) => n + t.incomePerHour, 0),
       idleCapHours: RULES.idleCapHours,
       ownedTiles: owned.length,
       buyableTiles: tiles.filter((t) => t.buyCost !== null).length,
@@ -258,12 +258,13 @@ export class GameService {
       const now = await this.clock.now(vehicleId);
       try {
         return await prisma.$transaction(async (tx) => {
-          const tile = (await this.tiles(tx, vehicleId)).get(id);
+          const all = await this.tiles(tx, vehicleId);
+          const tile = all.get(id);
           if (!tile || tile.visitDays.length === 0) throw new BadRequestException("직접 지나간 땅만 살 수 있어요");
           if (tile.ownerId === vehicleId) throw new BadRequestException("이미 내 땅이에요");
           if (tile.ownerId !== prevOwner) throw new ConflictException("방금 주인이 바뀌었어요. 다시 확인해 주세요");
           if (mustRevisit(tile)) throw new BadRequestException("주인이 바뀐 뒤에 다시 지나가야 살 수 있어요");
-          const cost = buyCost(tile.price);
+          const cost = buyCost(tile.price, ownedCount(all.values(), vehicleId));
           await this.spend(tx, vehicleId, cost, "BUY", id);
           if (tile.ownerId === null || tile.price === null) {
             await tx.ownedTile.create({ data: { ...key, vehicleId, price: cost, level: 1, collectedAt: now, tradedAt: now } });
@@ -415,7 +416,9 @@ export class GameService {
   }
 
   private async views(db: Db, vehicleId: string, now: Date): Promise<LandTileView[]> {
-    return [...(await this.tiles(db, vehicleId)).values()].map((t) => toView(t, vehicleId, now));
+    const tiles = [...(await this.tiles(db, vehicleId)).values()];
+    const owned = ownedCount(tiles, vehicleId);
+    return tiles.map((t) => toView(t, vehicleId, owned, now));
   }
 
   private async view(db: Db, vehicleId: string, id: string, now: Date) {
@@ -450,7 +453,13 @@ function mustRevisit(t: TileInfo) {
   return t.lastPassedAt === null || t.lastPassedAt <= t.tradedAt;
 }
 
-function toView(t: TileInfo, vehicleId: string, now: Date): LandTileView {
+function ownedCount(tiles: Iterable<TileInfo>, vehicleId: string) {
+  let n = 0;
+  for (const t of tiles) if (t.ownerId === vehicleId) n++;
+  return n;
+}
+
+function toView(t: TileInfo, vehicleId: string, ownedByMe: number, now: Date): LandTileView {
   const owned = t.ownerId === vehicleId;
   const visited = t.visitDays.length > 0;
   const revisit = !owned && mustRevisit(t);
@@ -465,10 +474,10 @@ function toView(t: TileInfo, vehicleId: string, now: Date): LandTileView {
     homeRoute: isHomeRoute(t, seoulDay(now)),
     goodTrips: t.goodTrips,
     badTrips: t.badTrips,
-    incomePerMinute: incomePerMinute(t),
+    incomePerHour: incomePerHour(t),
     pending: pendingIncome(t, now),
     mustRevisit: visited && revisit,
-    buyCost: !owned && visited && !revisit ? buyCost(t.price) : null,
+    buyCost: !owned && visited && !revisit ? buyCost(t.price, ownedByMe) : null,
     upgradeCost: owned ? upgradeCost(t.level) : null,
   };
 }

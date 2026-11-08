@@ -64,10 +64,10 @@ export interface LandTileView {
   /** 내가 이 칸을 지나간 주행 중 안전 점수 기준을 넘은 수와 넘지 못한 수. */
   goodTrips: number;
   badTrips: number;
-  /** 1분마다 들어오는 크레딧. 레벨 × max(1, 5 + goodTrips − badTrips). */
-  incomePerMinute: number;
+  /** 1시간마다 들어오는 크레딧. 레벨 × (5 + goodTrips − badTrips, 1~10으로 자름). */
+  incomePerHour: number;
   pending: number;
-  buyCost: number | null; // 살 수 있으면 가격(주인 없으면 기본값, 있으면 거래가 + 인상분)
+  buyCost: number | null; // 살 수 있으면 가격(주인 없으면 5 × (내 땅 수 + 1), 있으면 거래가 + 5)
   upgradeCost: number | null; // 올릴 수 있으면 가격
 }
 
@@ -89,7 +89,7 @@ export interface TodaySummary {
 export interface CarHomeResponse {
   credits: number;
   pendingIncome: number;
-  incomePerMinute: number;
+  incomePerHour: number;
   idleCapHours: number;
   ownedTiles: number;
   buyableTiles: number;
