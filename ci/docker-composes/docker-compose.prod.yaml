@@ -110,67 +110,69 @@ services:
       retries: 5
       start_period: 60s
 
-  web:
-    image: ${IMAGE_PREFIX:?IMAGE_PREFIX (ghcr.io/<owner>/<repo>) 가 필요합니다}/web:${IMAGE_TAG:-latest}
-    container_name: ${PROJECT_NAME}-web
-    restart: unless-stopped
-    environment:
-      - PROJECT_NAME=${PROJECT_NAME}
-      - NETWORK_NAME=${NETWORK_NAME}
-      - WEB_PORT=${WEB_PORT:-3001}
-      - APP_NAME=${APP_NAME}
-      # 컨테이너 내부 API 주소는 env 에 적지 않고 여기서 조립한다 (server 의 container_name 과 항상 일치).
-      - API_BASE_URL=http://${PROJECT_NAME}-server:${SERVER_PORT:-3000}
-      - NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL}
-      - NEXT_PUBLIC_PROJECT_NAME=${PROJECT_NAME}
-      - NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=${NEXT_PUBLIC_GOOGLE_MAPS_API_KEY:-}
-      - API_PUBLIC_URL=${API_PUBLIC_URL}
-      - PORT=${WEB_PORT:-3001}
-    ports:
-      - "${WEB_PORT:-3001}:${WEB_PORT:-3001}"
-    logging: *default-logging
-    networks:
-      - custom-network
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "wget -q --spider http://127.0.0.1:${WEB_PORT:-3001}/ || exit 1",
-        ]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 20s
+  # 로드랜드는 차량 앱용 API(server)만 운영한다. web/admin 은 필요할 때 주석을 푼다
+  # (nginx depends_on 과 ci/nginx/templates 의 web/admin 라우트도 함께 되살린다).
+  # web:
+  #   image: ${IMAGE_PREFIX:?IMAGE_PREFIX (ghcr.io/<owner>/<repo>) 가 필요합니다}/web:${IMAGE_TAG:-latest}
+  #   container_name: ${PROJECT_NAME}-web
+  #   restart: unless-stopped
+  #   environment:
+  #     - PROJECT_NAME=${PROJECT_NAME}
+  #     - NETWORK_NAME=${NETWORK_NAME}
+  #     - WEB_PORT=${WEB_PORT:-3001}
+  #     - APP_NAME=${APP_NAME}
+  #     # 컨테이너 내부 API 주소는 env 에 적지 않고 여기서 조립한다 (server 의 container_name 과 항상 일치).
+  #     - API_BASE_URL=http://${PROJECT_NAME}-server:${SERVER_PORT:-3000}
+  #     - NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL}
+  #     - NEXT_PUBLIC_PROJECT_NAME=${PROJECT_NAME}
+  #     - NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=${NEXT_PUBLIC_GOOGLE_MAPS_API_KEY:-}
+  #     - API_PUBLIC_URL=${API_PUBLIC_URL}
+  #     - PORT=${WEB_PORT:-3001}
+  #   ports:
+  #     - "${WEB_PORT:-3001}:${WEB_PORT:-3001}"
+  #   logging: *default-logging
+  #   networks:
+  #     - custom-network
+  #   healthcheck:
+  #     test:
+  #       [
+  #         "CMD-SHELL",
+  #         "wget -q --spider http://127.0.0.1:${WEB_PORT:-3001}/ || exit 1",
+  #       ]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+  #     start_period: 20s
 
-  admin:
-    image: ${IMAGE_PREFIX:?IMAGE_PREFIX (ghcr.io/<owner>/<repo>) 가 필요합니다}/admin:${IMAGE_TAG:-latest}
-    container_name: ${PROJECT_NAME}-admin
-    restart: unless-stopped
-    environment:
-      - PROJECT_NAME=${PROJECT_NAME}
-      - NETWORK_NAME=${NETWORK_NAME}
-      - ADMIN_PORT=${ADMIN_PORT:-3333}
-      - APP_NAME=${APP_NAME}
-      - NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL}
-      - NEXT_PUBLIC_PROJECT_NAME=${PROJECT_NAME}
-      # 컨테이너 내부 API 주소는 env 에 적지 않고 여기서 조립한다 (server 의 container_name 과 항상 일치).
-      - API_BASE_URL=http://${PROJECT_NAME}-server:${SERVER_PORT:-3000}
-      - PORT=${ADMIN_PORT:-3333}
-    ports:
-      - "${ADMIN_PORT:-3333}:${ADMIN_PORT:-3333}"
-    logging: *default-logging
-    networks:
-      - custom-network
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "wget -q --spider http://127.0.0.1:${ADMIN_PORT:-3333}/ || exit 1",
-        ]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 20s
+  # admin:
+  #   image: ${IMAGE_PREFIX:?IMAGE_PREFIX (ghcr.io/<owner>/<repo>) 가 필요합니다}/admin:${IMAGE_TAG:-latest}
+  #   container_name: ${PROJECT_NAME}-admin
+  #   restart: unless-stopped
+  #   environment:
+  #     - PROJECT_NAME=${PROJECT_NAME}
+  #     - NETWORK_NAME=${NETWORK_NAME}
+  #     - ADMIN_PORT=${ADMIN_PORT:-3333}
+  #     - APP_NAME=${APP_NAME}
+  #     - NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL}
+  #     - NEXT_PUBLIC_PROJECT_NAME=${PROJECT_NAME}
+  #     # 컨테이너 내부 API 주소는 env 에 적지 않고 여기서 조립한다 (server 의 container_name 과 항상 일치).
+  #     - API_BASE_URL=http://${PROJECT_NAME}-server:${SERVER_PORT:-3000}
+  #     - PORT=${ADMIN_PORT:-3333}
+  #   ports:
+  #     - "${ADMIN_PORT:-3333}:${ADMIN_PORT:-3333}"
+  #   logging: *default-logging
+  #   networks:
+  #     - custom-network
+  #   healthcheck:
+  #     test:
+  #       [
+  #         "CMD-SHELL",
+  #         "wget -q --spider http://127.0.0.1:${ADMIN_PORT:-3333}/ || exit 1",
+  #       ]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+  #     start_period: 20s
 
   # 호스트 포트를 열지 않는 내부 리버스 프록시.
   # 외부 트래픽(80/443)과 TLS 는 서버 공용 엣지 프록시(Caddy, ci/edge/)가 담당하며,
@@ -193,10 +195,10 @@ services:
     depends_on:
       server:
         condition: service_started
-      web:
-        condition: service_started
-      admin:
-        condition: service_started
+      # web:
+      #   condition: service_started
+      # admin:
+      #   condition: service_started
     networks:
       - custom-network
       - edge

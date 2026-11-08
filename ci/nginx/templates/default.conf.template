@@ -45,68 +45,74 @@ server {
         proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;
     }
 
-    # Frontend Web Application (Next.js)
+    # 로드랜드는 web 을 띄우지 않는다(docker-compose.prod.yaml 참고). 되살릴 때 아래 주석을 푼다.
     location / {
-        set $upstream_web http://${PROJECT_NAME}-web:${WEB_PORT};
-        proxy_pass $upstream_web;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_cache_bypass $http_upgrade;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;
+        return 404;
     }
+
+    # # Frontend Web Application (Next.js)
+    # location / {
+    #     set $upstream_web http://${PROJECT_NAME}-web:${WEB_PORT};
+    #     proxy_pass $upstream_web;
+    #     proxy_http_version 1.1;
+    #     proxy_set_header Upgrade $http_upgrade;
+    #     proxy_set_header Connection "upgrade";
+    #     proxy_set_header Host $host;
+    #     proxy_cache_bypass $http_upgrade;
+    #     proxy_set_header X-Real-IP $remote_addr;
+    #     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    #     proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;
+    # }
 }
 
-server {
-    listen 80;
-    server_name admin.${SERVER_NAME};
+# admin 도 띄우지 않는다. 되살릴 때 아래 server 블록 주석을 푼다.
+# server {
+#     listen 80;
+#     server_name admin.${SERVER_NAME};
     
-    # Allow large file uploads
-    client_max_body_size 100M;
+#     # Allow large file uploads
+#     client_max_body_size 100M;
 
-    # Re-resolve upstream hostnames periodically instead of caching the IP
-    # from container start — otherwise a container restart/recreate (new IP)
-    # leaves nginx pointing at a dead address until nginx itself is reloaded.
-    resolver 127.0.0.11 valid=10s ipv6=off;
+#     # Re-resolve upstream hostnames periodically instead of caching the IP
+#     # from container start — otherwise a container restart/recreate (new IP)
+#     # leaves nginx pointing at a dead address until nginx itself is reloaded.
+#     resolver 127.0.0.11 valid=10s ipv6=off;
 
-    # Backend API requests
-    location /api/ {
-        set $upstream_api http://${PROJECT_NAME}-server:${SERVER_PORT};
-        proxy_pass $upstream_api;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_cache_bypass $http_upgrade;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;
-    }
+#     # Backend API requests
+#     location /api/ {
+#         set $upstream_api http://${PROJECT_NAME}-server:${SERVER_PORT};
+#         proxy_pass $upstream_api;
+#         proxy_http_version 1.1;
+#         proxy_set_header Upgrade $http_upgrade;
+#         proxy_set_header Connection "upgrade";
+#         proxy_set_header Host $host;
+#         proxy_cache_bypass $http_upgrade;
+#         proxy_set_header X-Real-IP $remote_addr;
+#         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+#         proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;
+#     }
 
-    # Backend static/uploaded resources
-    location /resources/ {
-        set $upstream_api http://${PROJECT_NAME}-server:${SERVER_PORT};
-        proxy_pass $upstream_api;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;
-    }
+#     # Backend static/uploaded resources
+#     location /resources/ {
+#         set $upstream_api http://${PROJECT_NAME}-server:${SERVER_PORT};
+#         proxy_pass $upstream_api;
+#         proxy_http_version 1.1;
+#         proxy_set_header Host $host;
+#         proxy_set_header X-Real-IP $remote_addr;
+#         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+#         proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;
+#     }
 
-    location / {
-        set $upstream_admin http://${PROJECT_NAME}-admin:${ADMIN_PORT};
-        proxy_pass $upstream_admin;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_cache_bypass $http_upgrade;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;
-    }
-}
+#     location / {
+#         set $upstream_admin http://${PROJECT_NAME}-admin:${ADMIN_PORT};
+#         proxy_pass $upstream_admin;
+#         proxy_http_version 1.1;
+#         proxy_set_header Upgrade $http_upgrade;
+#         proxy_set_header Connection "upgrade";
+#         proxy_set_header Host $host;
+#         proxy_cache_bypass $http_upgrade;
+#         proxy_set_header X-Real-IP $remote_addr;
+#         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+#         proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;
+#     }
+# }
