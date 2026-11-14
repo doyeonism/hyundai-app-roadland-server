@@ -235,7 +235,7 @@ jobs:
           IMAGE_PREFIX: ${{ needs.changes.outputs.image_prefix }}
           GHCR_USER: ${{ github.actor }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # VM 의 저장소 위치. 비우면 /srv/loadland 를 쓴다(접속 계정에 쓰기 권한이 있어야 한다).
+          # VM 의 저장소 위치. 비우면 /srv/roadland 를 쓴다(접속 계정에 쓰기 권한이 있어야 한다).
           APP_DIR: ${{ secrets.VM_APP_DIR }}
           REPO_NAME: ${{ github.event.repository.name }}
           REPO_SLUG: ${{ github.repository }}
@@ -248,7 +248,7 @@ jobs:
           script: |
             set -euo pipefail
 
-            APP_DIR="${APP_DIR:-/srv/loadland}"
+            APP_DIR="${APP_DIR:-/srv/roadland}"
             echo "배포 위치: $APP_DIR"
 
             # 처음 배포라 저장소가 없으면 clone 한다. VM 의 ~/.ssh/id_ed25519 가
