@@ -1,293 +1,170 @@
-# 🏗️ Monorepo Boilerplate Template
+# Roadland 서버
 
-이 프로젝트는 **Next.js (Frontend)**, **NestJS (Backend)**, **Prisma (ORM)**를 기반으로 하는 고성능, 고생산성 Monorepo 개발 템플릿입니다. **Turborepo**와 **pnpm workspace**를 통해 멀티 패키지를 효율적으로 관리하며, 개발(dev) 및 운영(prod) 환경 전체를 Docker Compose 기반으로 가동할 수 있도록 컨테이너화되어 있습니다.
+**안전한 운전으로 넓히는 나의 영토**
 
----
+로드랜드 차량 앱의 안전 주행 보상, 영토 소유권, 개인 레벨, 크레딧 정산을 담당하는 NestJS 서버입니다. 차량에서 받은 주행 요약을 검증하고 PostgreSQL 트랜잭션으로 잔액과 소유권을 관리합니다.
 
-## 🗺️ 아키텍처 개요
+- [차량 앱 저장소·실행 환경](https://github.com/doyeonism/hyundai-app-roadland)
+- [서명된 release APK](https://github.com/doyeonism/hyundai-app-roadland/tree/main/apk)
+- [데이터 보관·삭제·정산 정책](docs/roadland-data-policy.md)
+- 기본 차량 API: `https://roadland.doyeonism.com/api/roadland/v1/car`
 
-본 템플릿은 패키지 간의 명확한 역할 분담과 느슨한 결합을 지향합니다.
+## 구조
 
 ```mermaid
-graph TD
-    subgraph Apps [애플리케이션 레이어 - apps/]
-        Web["💻 Next.js (web)"]
-        API["⚙️ NestJS (api)"]
-    end
-
-    subgraph Packages [공유 패키지 레이어 - packages/]
-        UI["🎨 @roadland/ui<br>(Tailwind v4 / Radix UI)"]
-        Shared["🧩 @roadland/shared<br>(공통 Types / Models / Responses)"]
-        DB["🗄️ @roadland/database<br>(Prisma Client / PG Adapter)"]
-    end
-
-    subgraph Data [데이터베이스 레이어]
-        Postgres[(PostgreSQL 16 Alpine)]
-    end
-
-    %% 의존성 관계
-    Web --> UI
-    Web --> Shared
-    Web --> DB
-    API --> Shared
-    API --> DB
-    DB --> Postgres
-    Shared --> DB
+flowchart LR
+    App["Pleos Connect 차량 앱"] -->|HTTPS · Bearer| Caddy["Caddy · TLS"]
+    Caddy --> Nginx["내부 nginx"]
+    Nginx --> API["NestJS · Roadland API"]
+    API --> DB[(PostgreSQL 16)]
+    API --> Redis[(Redis 7)]
 ```
 
----
+| 경로 | 역할 |
+|---|---|
+| `apps/api/src/roadland/controllers` | 차량 API·개발 시연 API |
+| `apps/api/src/roadland/services` | 인증·정산·구매·개인 레벨·개인정보 처리 |
+| `apps/api/src/roadland/domain` | 보상 규칙·타일 좌표·시간 계산 |
+| `packages/database` | Prisma 스키마·마이그레이션·DB 클라이언트 |
+| `packages/shared` | 앱·서버 요청 및 응답 타입 |
+| `apps/web`, `apps/admin`, `packages/ui` | 웹·관리자 기반 코드. 현재 기본 배포 대상에서 제외 |
+| `ci/docker-composes`, `ci/dockers`, `ci/nginx`, `ci/edge` | 개발·테스트·운영 컨테이너 및 프록시 설정 |
+| `.github/workflows/build_and_deploy.yml` | 테스트·GHCR 빌드·운영 배포 |
 
-## 🛠️ 기술 스택 (Tech Stack)
+NestJS 11, Prisma 7, TypeScript, pnpm workspace와 Turborepo를 사용합니다. 정확한 의존성 버전은 각 `package.json`과 `pnpm-lock.yaml`을 기준으로 합니다.
 
-### 📦 모노레포 관리 & 빌드 도구
-* **Turborepo**: 전체 애플리케이션 및 패키지 파이프라인 빌드 최적화 (캐싱 지원)
-* **pnpm Workspace**: 빠르고 효율적인 의존성 관리 및 디스크 공간 절약 (`pnpm@10.10.0`)
-* **TypeScript Project References**: 멀티 패키지 환경에서 안전하고 빠른 타입 체킹 (`composite: true`)
+## 실행 준비
 
-### 💻 프론트엔드 (`apps/web`)
-* **Next.js v16 (App Router)**: 최신 React 서버 컴포넌트(RSC) 및 최적화된 라우팅
-* **Tailwind CSS v4 & PostCSS**: 강력한 최신 CSS 빌드 파이프라인 및 디자인 토큰 제어
-* **TanStack Query (React Query) v5**: 선언적 데이터 페칭, 캐싱 및 서버 상태 관리
-* **Zustand**: 클라이언트 전역 상태 관리
-* **React Hook Form & Hookform Resolvers**: 타입 세이프 폼 관리 및 유효성 검증
-* **Framer Motion**: 부드러운 인터랙션 및 화면 전환 애니메이션
-
-### ⚙️ 백엔드 (`apps/api`)
-* **NestJS v11**: Scalable한 구조를 보장하는 강력한 Node.js 프레임워크
-* **Passport.js & JWT Strategy**: JWT Access Token 및 Refresh Token 기반의 견고한 인증 시스템
-* **NestJS Throttler**: OTP/인증 브루트포스 공격 방어용 전역 데코레이터 및 레이트 리밋 (1분당 5회 제한 등)
-* **Swagger API 문서화**: `DocumentBuilder`를 활용해 API 엔드포인트 자동 문서화 제공
-* **Nodemailer & MailModule**: 이메일 전송 기능 내장
-* **Azure Blob Storage / Local File Sync**: 파일 업로드 및 클라우드 동기화 시스템 인프라 구축 (`FileModule`)
-
-### 🗄️ 데이터베이스 (`packages/database`)
-* **Prisma ORM v7**: 강력한 타입 안전성을 보장하는 데이터베이스 모델링 및 쿼리 도구
-* **PostgreSQL 16**: 안정적이고 신뢰도 높은 RDBMS
-* **Prisma Pg Adapter**: 연결 풀링(Connection Pooling)과 가벼운 데이터베이스 연결을 위한 `@prisma/adapter-pg` 기본 탑재
-* **Prisma Zod Generator**: Prisma 스키마 기반 Zod 유효성 검사 파일 자동 생성
-  > **성능 최적화 설정**: 무한 로딩 및 TypeScript 서버 다운을 유발하는 배럴 파일(`export *`) 생성을 방지하고, 다중 파일 분할 기능(`useMultipleFiles: true`, `writeBarrelFiles: false`)을 적용하여 로컬 IDE 성능을 보존합니다.
-
----
-
-## 📁 디렉토리 구조 (Directory Structure)
+- Node.js 22(CI 기준), pnpm **10.10.0**
+- Docker와 Docker Compose v2
+- `make`를 사용할 수 있는 Linux·WSL 또는 호환 환경. Windows에서는 Docker Desktop과 WSL 사용 가능
+- PostgreSQL 16, Redis 7은 Compose로 기동
 
 ```bash
-.
-├── Makefile                     # Docker Compose 실행 및 볼륨 정리를 위한 자동화 스크립트
-├── turbo.json                   # Turborepo 빌드/파이프라인 캐싱 설정
-├── pnpm-workspace.yaml          # pnpm 모노레포 패키지 경로 지정
-├── package.json                 # 루트 의존성 및 통합 pnpm 실행 스크립트
-├── tsconfig.json                # TypeScript Project References 루트 설정
-│
-├── apps/                        # 서비스 애플리케이션 영역
-│   ├── web/                     # Next.js 프론트엔드 (포트 3001)
-│   │   └── src/
-│   │       ├── app/             # App Router 및 글로벌 공급자 (globals.css, layout 등)
-│   │       ├── views/           # 페이지 템플릿 컴포넌트
-│   │       ├── widgets/         # 독립적이고 완성도 높은 기능적 컴포넌트 묶음
-│   │       ├── features/        # 사용자의 액션 기반 인터랙션 로직 (폼, 버튼 등)
-│   │       ├── entities/        # 비즈니스 도메인 및 데이터 엔티티 단위 (User, Point 등)
-│   │       └── shared/          # 공통 컴포넌트 및 유틸리티
-│   │
-│   └── api/                     # NestJS 백엔드 (포트 3000)
-│       └── src/
-│           ├── auth/            # 인증 컨트롤러, 서비스, DTO (Access/Refresh, OTP 등)
-│           ├── shared/          # 글로벌 모듈, 에러 필터, 가드, 인터셉터 등
-│           └── main.ts          # 서버 부트스트랩 및 Prisma DB 커넥션 수립
-│
-├── packages/                    # 공통 공유 라이브러리 영역
-│   ├── database/                # Prisma 스키마 파일 및 Prisma Client 빌드 패키지
-│   │   ├── prisma/
-│   │   │   └── schema/          # Prisma Multi-Schema (main, user, file.prisma 등)
-│   │   └── generated/           # 빌드 시 생성되는 Prisma Client 및 Zod 파일 저장소
-│   │
-│   ├── shared/                  # 앱 간 공유되는 TypeScript 공통 타입 선언부 (Entity, Response 등)
-│   │
-│   └── ui/                      # 56종의 Tailwind CSS v4 + Radix UI 디자인 시스템 컴포넌트 라이브러리
-│
-├── scripts/                     # 유틸리티 스크립트
-│   └── rename.sh                # 템플릿 네이밍(@template, PROJECT_NAME 등) 일괄 치환기
-├── envs/                        # 환경 변수 폴더
-│   └── .env.example             # 환경 변수 템플릿 (유일하게 커밋됨. 실제 .env* 는 gitignore)
-└── ci/                          # CI/CD 및 도커 컨테이너 설정 파일 저장소
-    ├── docker-composes/         # 환경별 Docker Compose 파일 (dev, prod)
-    ├── nginx/                   # 운영용 nginx 리버스 프록시 템플릿 (prod)
-    ├── db/                      # DB 초기화 스크립트 (init.sql)
-    └── dockers/                 # 서비스별 Dockerfile 정의 (dev, prod, test)
+git clone git@github.com:doyeonism/hyundai-app-roadland-server.git
+cd hyundai-app-roadland-server
+corepack enable
+pnpm install --frozen-lockfile
+cp envs/.env.example envs/.env.dev
 ```
 
----
+`envs/.env.dev`를 다음 기준으로 설정합니다. 예제의 비밀번호와 JWT 자리표시자는 실제 로컬 값으로 바꾸세요. 운영 환경과 같은 비밀번호를 쓰지 않습니다.
 
-## 🚀 시작하기 (Getting Started)
+| 변수 | 설정 기준 |
+|---|---|
+| `NODE_ENV` | 로컬은 `development`, 운영은 `production` |
+| `PROJECT_NAME` | 앱의 기본 URL과 맞추려면 `roadland`. API 경로와 컨테이너명에도 사용 |
+| `NETWORK_NAME` | 환경별로 구분한 Docker 네트워크명 |
+| `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` | 로컬 DB 계정·비밀번호·DB 이름 |
+| `SERVER_PORT`, `DB_PORT` | 기본 API 3000, DB 5432. 충돌 시 변경 |
+| `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD` | 컨테이너 내부 호스트·포트는 Compose가 주입. 호스트에서 실행할 때는 실제 연결 주소 지정 |
+| `ACCESS_JWT_SECRET`, `REFRESH_JWT_SECRET`, `SIGN_UP_JWT_SECRET` | 공통 인증 모듈의 환경 검증에 필요. 차량 Bearer 토큰과는 별도 |
+| `COOKIE_DOMAIN` | localhost 개발에서는 비워 두기 |
+| `ALLOWED_ORIGINS` | 실제로 허용할 웹 오리진만 설정 |
+| `API_PUBLIC_URL`, `WEB_PUBLIC_URL` | 외부에서 접근하는 주소. 웹 관련 선택 기능 사용 시 맞춤 설정 |
 
-### 0. (선택) 템플릿을 내 프로젝트로 리네임
+전체 변수와 선택 기능은 [환경 예제](envs/.env.example)를 참고하세요. `NEXT_PUBLIC_` 변수는 브라우저에 노출될 수 있으므로 비밀정보를 넣지 않습니다.
 
-이 템플릿은 npm 스코프 `@roadland/*`, 루트 패키지명 `template`, `PROJECT_NAME=template-*` 을 기본값으로 씁니다. 실제 프로젝트로 사용할 때는 아래 스크립트로 한 번에 치환하세요.
-
-```bash
-# ./scripts/rename.sh <새이름> [스코프]
-./scripts/rename.sh myapp          # @myapp/*, name "myapp", PROJECT_NAME myapp-* 로 치환
-./scripts/rename.sh myapp acme     # 스코프만 @acme/*, 나머지는 myapp
-
-# 치환 후 반드시 락파일을 재생성 (package.json 변경을 pnpm-lock.yaml 에 반영)
-pnpm install
-```
-
-스크립트가 한 번에 바꿔주는 것:
-* `@roadland/*` → `@<스코프>/*` — 공유 패키지 3개 정의 + 모든 import 구문
-* 루트 `package.json` 의 `"name"`
-* `envs/.env*` 의 `PROJECT_NAME` (접미사 `-dev`/`-prod` 는 유지)
-
-> [!IMPORTANT]
-> `pnpm-lock.yaml` 은 **커밋 대상**입니다(gitignore 금지). Docker 빌드는 `pnpm install --frozen-lockfile` 로 락파일과 `package.json` 의 일치를 검증하므로, 리네임 후 `pnpm install` 로 락파일을 갱신하지 않으면 빌드가 실패합니다.
-
----
-
-### 1. 환경 변수 설정
-
-실제 값이 담긴 `.env*` 파일은 커밋되지 않습니다. `envs/.env.example` 을 복사해 환경별 파일을 만드세요.
+## 개발 환경 실행
 
 ```bash
-cp envs/.env.example envs/.env.dev      # 로컬 개발 (make dev)
-cp envs/.env.example envs/.env.prod     # 운영     (make prod)
-```
-
-* `PROJECT_NAME`/`NETWORK_NAME` 은 dev/prod 를 다르게 두어 컨테이너·네트워크 충돌을 피하세요.
-* 주소 변수는 역할이 다릅니다 — `API_BASE_URL`(컨테이너 내부에서 SSR/proxy 가 부르는 API, `http://<PROJECT_NAME>-server:<SERVER_PORT>`), `API_PUBLIC_URL`/`NEXT_PUBLIC_API_BASE_URL`(브라우저에서 부르는 API), `WEB_PUBLIC_URL`(브라우저에서 여는 web 앱: 비밀번호 재설정 링크·소셜 로그인 랜딩). `NEXT_PUBLIC_PROJECT_NAME` 은 설정하지 않습니다(`PROJECT_NAME` 에서 자동 유도).
-* **로컬(localhost) 개발에서는 `COOKIE_DOMAIN` 을 비워 두세요.** `.myapp.doyeonism.com` 같은 값이 들어 있으면 브라우저가 로그인 쿠키를 저장하지 않아 로그인이 되지 않습니다.
-* JWT 시크릿은 운영에서 반드시 `openssl rand -hex 32` 로 새로 발급해 교체하세요.
-* 이메일·Azure Blob 등 선택 기능은 값을 채울 때만 활성화됩니다. 자세한 설명은 `.env.example` 주석 참고.
-
----
-
-### 2. 개발 환경 실행 (Development)
-
-로컬 개발 환경에서는 자체 도커 네트워크를 기반으로 PostgreSQL, DB 마이그레이션 와처, NestJS 서버, Next.js 프론트엔드가 유기적으로 연동되어 기동됩니다.
-
-#### 1) 의존성 설치 및 Prisma Client/Zod 생성
-```bash
-pnpm install          # 의존성 설치
-pnpm run db:generate  # 데이터베이스 클라이언트 및 Zod 생성
-```
-> [!IMPORTANT]
-> `make dev` 또는 로컬 실행 전, 반드시 `pnpm run db:generate`를 한 번 실행하여 공통 모듈용 `@roadland/database` 의 `generated` 결과물이 존재하도록 해야 타입 컴파일 에러가 발생하지 않습니다.
-
-#### 2) 로컬 도커 가동
-```bash
+pnpm run db:generate
 make dev
 ```
-`envs/.env.dev` 와 도커 네트워크를 적용해 다음 컨테이너들을 기동합니다 (컨테이너명은 `PROJECT_NAME` 접두사를 따름, 기본 `template-dev`):
-* **`<PROJECT_NAME>-db`**: PostgreSQL 데이터베이스 (포트 `DB_PORT`, 기본 5432)
-* **`db-migrate`**: Prisma Schema 디렉토리(`packages/database/prisma/schema/`) 변화를 Watch 하여 Prisma Client 를 자동 갱신·적용하는 `db:dev` 데몬
-* **`<PROJECT_NAME>-server`**: NestJS 백엔드 서버 (포트 `SERVER_PORT`, 기본 3000) — 소스 볼륨 마운트로 핫리로드
-* **`<PROJECT_NAME>-web`**: Next.js 프론트엔드 (포트 `WEB_PORT`, 기본 3001) — 핫리로드
 
----
+현재 기본 개발 Compose는 **API·PostgreSQL·Redis**를 기동합니다. API 컨테이너는 Prisma 생성, 마이그레이션 적용, database → shared 빌드를 수행한 후 watch 모드로 실행합니다. 웹·관리자·nginx 서비스는 개발 Compose에서 주석 처리되어 있습니다.
 
-### 3. 운영 환경 실행 (Production)
+`PROJECT_NAME=roadland`, `SERVER_PORT=3000`일 때:
 
-운영 이미지는 **VM 에서 빌드하지 않습니다.** `main` 에 push 하면 GitHub Actions 가 변경된 앱(`api`/`web`/`admin`)만 멀티스테이지로 빌드해 GHCR(`ghcr.io/<owner>/<repo>/<app>`)에 올리고, VM 은 pull 후 이미지가 바뀐 컨테이너만 교체합니다(`.github/workflows/build_and_deploy.yml`). 빌드는 Turborepo 가 `database → shared → 앱` 순서를 자동으로 보장합니다.
+- 헬스 체크: `http://localhost:3000/api/roadland/v1/health`
+- 차량 API: `http://localhost:3000/api/roadland/v1/car`
+- Android 에뮬레이터에서 호스트 API: `http://10.0.2.2:3000/api/roadland/v1/car`
 
-```bash
-make prod   # = docker compose pull → up -d --wait (healthcheck 통과까지 대기)
-```
-`envs/.env.prod` 에는 **`IMAGE_PREFIX=ghcr.io/<owner>/<repo>`** 가 있어야 하며(워크플로우가 배포 시 자동 기록), 롤백은 `IMAGE_TAG=<커밋 SHA>` 를 지정해 다시 `make prod` 하면 됩니다. 비공개 패키지면 VM 에서 먼저 `docker login ghcr.io` 가 필요합니다. 다음 컨테이너들이 기동됩니다 (기본 접두사 `template-prod`):
-* **`<PROJECT_NAME>-db`**: PostgreSQL 데이터베이스 (호스트 포트는 `127.0.0.1` 에만 바인딩 — 원격 접속은 SSH 터널)
-* **`<PROJECT_NAME>-server`**: NestJS 백엔드 (기동 시 `prisma migrate deploy` 로 미적용 마이그레이션 반영)
-* **`<PROJECT_NAME>-web`** / **`<PROJECT_NAME>-admin`**: Next.js 프론트엔드 (Standalone 빌드)
-* **`<PROJECT_NAME>-redis`**: 인증 토큰/OTP 저장소
-* **`<PROJECT_NAME>-nginx`**: 내부 리버스 프록시 (호스트 포트 미노출 — 엣지 프록시가 `edge` 네트워크로 접근)
-
-> [!NOTE]
-> 외부 트래픽(80/443)과 TLS 인증서는 프로젝트 스택이 아니라 **서버 공용 엣지 프록시(Caddy)** 가 담당합니다. 인증서 발급·자동 갱신은 Caddy 에 내장되어 있어 별도 작업이 필요 없습니다. 셋업 방법은 아래 "HTTPS / 멀티 프로젝트 (엣지 프록시)" 섹션을 참고하세요.
-
-> [!CAUTION]
-> 기존 PostgreSQL 볼륨에 다른 스키마 버전의 데이터가 남아있으면 마이그레이션 충돌이 발생할 수 있습니다.
-> 새로 가동할 때는 **`make clean`** 으로 Docker 볼륨을 완전히 삭제한 뒤 `make prod` 를 실행하는 것을 권장합니다.
-
----
-
-### 3-1. HTTPS / 멀티 프로젝트 (엣지 프록시)
-
-한 서버에서 여러 프로젝트를 HTTPS 로 서빙하기 위해, 80/443 은 서버당 1개의 **Caddy 엣지 프록시**가 소유하고 도메인별로 각 프로젝트의 nginx 로 라우팅합니다. TLS 발급·갱신(Let's Encrypt)은 Caddy 가 전자동으로 처리하며, 인증서는 엣지의 `caddy-data` 볼륨에 저장되므로 프로젝트를 `make clean` 해도 영향받지 않습니다.
-
-**서버 최초 셋업 (1회)** — `ci/edge/` 를 서버로 복사한 뒤:
+차량 앱의 로컬 API 지정 방법은 [앱 README](https://github.com/doyeonism/hyundai-app-roadland#readme)에 있습니다. `10.0.2.2`는 Android 에뮬레이터의 호스트 접근용 주소입니다.
 
 ```bash
-docker network create edge
-cd edge && docker compose up -d
+docker compose -p roadland --env-file envs/.env.dev -f ci/docker-composes/docker-compose.dev.yaml logs -f server
 ```
 
-**프로젝트 추가 시 (프로젝트당 1회)**:
+프로젝트명을 다르게 설정했다면 `-p` 값도 맞춥니다. 종료·정리는 Makefile의 동작을 먼저 확인하세요. **`make clean`은 DB 볼륨을 삭제하므로 운영 업데이트나 초기 설정의 기본 절차로 사용하지 않습니다.**
 
-1. 도메인 DNS A 레코드를 서버 IP 로 연결
-2. `envs/.env.prod` 의 `SERVER_NAME` 에 도메인 설정 후 `make prod`
-3. 엣지의 `Caddyfile` 에 블록 추가 후 reload:
+## 인증과 주요 API
 
-```
-myapp.example.com {
-    reverse_proxy <PROJECT_NAME>-nginx:80
-}
-```
+차량 = 계정인 MVP입니다. `POST /devices`로 무작위 토큰을 발급하고 이후 `Authorization: Bearer <token>`으로 요청합니다. DB에는 토큰의 SHA-256 해시만 저장하며 Redis도 토큰 해시를 키로 사용합니다. 토큰 원문은 차량 앱이 보관합니다. 재설치 시 기존 차량 계정 복구는 별도 해결 과제입니다.
+
+다음 경로는 `/api/roadland/v1/car` 기준입니다.
+
+| 메서드·경로 | 기능 |
+|---|---|
+| `POST /devices` | 차량 등록·토큰 발급 |
+| `POST /privacy/consent` | 동의 버전 기록 |
+| `GET /home` | 잔액·개인 레벨·수익·오늘 주행 요약 |
+| `POST /trips` | `clientTripId` 기반 중복 방지 주행 정산 |
+| `GET /territory` | 방문 영역·소유권·구매 가능 여부 |
+| `POST /tiles/:id/buy` | 방문·재방문 조건과 잔액을 확인한 땅 구매 |
+| `POST /profile/upgrade` | 개인 레벨업. `expectedLevel`로 현재 레벨 확인 |
+| `POST /collect` | 누적 소유지 수익 수령 |
+| `GET /records` | 안전 점수·연속 기록 |
+| `GET /ranking` | 소유한 땅 수·주간 주행 순위 |
+| `DELETE /profile` | 차량 계정과 종속 데이터 삭제 |
+
+등록을 제외한 위 차량 API에는 차량 토큰이 필요합니다. 과거 `POST /tiles/:id/upgrade`는 현재 개별 땅 업그레이드를 수행하지 않으며 개인 레벨업 이용을 안내합니다. 차량 앱의 UI·문서와 서버 버전이 다르면 이 계약을 확인하세요.
+
+## 안전 운전과 정산
+
+- 급제동·차량 안전 경고가 기록된 타일은 주행 보상에서 제외합니다.
+- 안전 구간 기본 보상은 타일당 40크레딧, ECO·크루즈 추가 보상은 50%, 방향지시등 사용률 80% 이상인 차선 변경 주행의 매너 보너스는 20%입니다.
+- 안전 점수 90점 이상인 유효 주행은 안전 연속 기록에 반영합니다. 하루 주행 보상은 서울 날짜 기준 최대 8,000크레딧입니다.
+- 시간·평균 속도·거리 대비 타일 수·타일 연속성·주행 시간 겹침을 검증합니다. 이는 입력의 일관성 검증이며 실제 교통법규 준수 전체를 인증하지 않습니다.
+- 같은 차량의 같은 `clientTripId`는 저장된 정산 결과를 반환합니다. 차량별 Redis 잠금과 DB 행 잠금·트랜잭션으로 잔액·원장·소유권 변경을 처리합니다.
+- 개인 레벨업은 기존 잔액으로 비용을 결제하고, 기존 레벨에서 발생한 수익을 정산한 후 레벨을 올립니다. 개인 레벨 상승 시 모든 소유지의 하루 수익이 1씩 증가합니다.
+- 소유지 수익은 개인 레벨과 경과 시간에 따르며 안전 점수 미달로 모두 차단되는 구조는 아닙니다. 안전 관련 방문 통계와 수익 계산을 구분합니다.
+
+현재 수치와 판정은 [보상 규칙](apps/api/src/roadland/domain/rules.ts), [게임 서비스](apps/api/src/roadland/services/game.service.ts), [데이터·정산 정책](docs/roadland-data-policy.md)을 기준으로 합니다. 주행 중 화면 제한과 차량 신호 기반 점수 계산은 차량 앱이 담당합니다.
+
+## 데이터와 개인정보
+
+원본 GPS 좌표 대신 약 10m 타일과 주행 요약을 받습니다. 타일도 생활 동선을 추정할 수 있는 데이터로 취급합니다.
+
+- 주행별 상세 타일: 90일 후 비움
+- 날짜별 방문: 서울 기준 최근 7일 유지
+- 구매·재방문 자격용 방문 타일과 마지막 통과 시각: 계정 삭제까지 보관
+- 주행 요약·중복 정산 키·크레딧 원장: 계정 삭제까지 유지
+- 삭제 API: 차량·종속 DB 데이터, 인증 캐시 및 랭킹 정리
+
+백업 파일의 별도 보존·만료 정책은 아직 확정이 필요합니다. 자세한 조건과 운영 과제는 [데이터 정책](docs/roadland-data-policy.md)에 정리했습니다. 시각은 UTC로 저장하고 일일 정산 날짜는 서울 기준으로 계산합니다.
+
+## 테스트와 빌드
+
+CI와 동일한 의존 패키지 준비 순서입니다.
 
 ```bash
-docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile
+pnpm --filter @roadland/database db:generate
+pnpm --filter @roadland/database build
+pnpm --filter @roadland/shared build
+pnpm --filter api test -- --runInBand
+pnpm --filter api test:e2e
+pnpm api:build
 ```
 
-Caddyfile 에 명시된 도메인 외의 요청(임의 서브도메인 등)에는 엣지가 응답하지 않으며, 프로젝트 nginx 도 `SERVER_NAME` 이외의 Host 를 차단합니다(444).
+테스트는 `envs/.env.test`의 더미 설정을 사용합니다. E2E는 Docker가 필요하며 격리된 PostgreSQL 5433·Redis 6380을 기동하고 종료 시 테스트 볼륨을 정리합니다. 해당 포트가 다른 서비스와 충돌하지 않아야 합니다. README 정리 작업에서 위 테스트 전체를 새로 실행한 것으로 간주하지 마세요.
 
----
+## 운영 배포
 
-## 🛠️ 개발 명령어 모음 (Commands Registry)
+```bash
+cp envs/.env.example envs/.env.prod
+# 환경별 비밀값, NODE_ENV=production, 도메인, 이미지 설정 입력
+make prod
+```
 
-| 명령어 | 설명 | 실행 레벨 |
-| :--- | :--- | :--- |
-| `./scripts/rename.sh <이름> [스코프]` | 템플릿 네이밍(`@template`, 루트명, `PROJECT_NAME`) 일괄 치환 후 `pnpm install` | Host CLI |
-| `make dev` | 개발용 컨테이너 기동 (`.env.dev` 사용) | Host CLI |
-| `make prod` | 운영용 컨테이너 빌드 및 백그라운드 기동 (`.env.prod` 사용) | Host CLI |
-| `make down` | 구동 중인 모든 개발/운영 컨테이너 정지 (볼륨 보존 — DB 데이터 유지) | Host CLI |
-| `make clean` | 컨테이너 정지 + **도커 볼륨 영구 삭제** (SSL 인증서는 엣지 볼륨에 있어 무관) | Host CLI |
-| `pnpm install` | 프로젝트 내 모든 모노레포 패키지 의존성 통합 설치 | Host CLI / Root |
-| `pnpm run build` | Turborepo 로 전체 패키지 빌드 (의존성 순서·캐싱 자동 처리) | Host CLI / Root |
-| `pnpm run type-check` | 전체 워크스페이스 타입 체크 | Host CLI / Root |
-| `pnpm run db:generate` | Prisma 스키마 기반 Prisma Client 및 Zod 타입 생성 | Host CLI / Root |
-| `pnpm run web:dev` | 로컬 환경에서 프론트엔드만 개별 실행 (포트 3001) | Host CLI / Root |
-| `pnpm run api:dev` | 로컬 환경에서 백엔드만 개별 실행 (포트 3000) | Host CLI / Root |
+`IMAGE_PREFIX=ghcr.io/doyeonism/hyundai-app-roadland-server`와 필요한 이미지 태그·레지스트리 인증을 설정합니다. GitHub Actions는 테스트 후 현재 배포 대상인 **api** 이미지를 GHCR에 게시하고, 운영 서버는 이미지를 pull하여 컨테이너를 교체합니다. GitHub 저장소·패키지 권한과 배포 Secrets는 별도로 설정해야 하며 README push만으로 배포 구성이 완성되지는 않습니다.
 
----
+외부 HTTPS는 [Caddy 설정](ci/edge), 내부 라우팅은 [nginx 설정](ci/nginx)을 사용합니다. Caddy와 프로젝트 nginx가 동일한 edge 네트워크에 연결되고 upstream 이름이 실제 컨테이너명과 일치해야 합니다. API 컨테이너 기동 시 DB 마이그레이션을 적용하므로 운영 업데이트 전 백업과 마이그레이션 내용을 확인합니다.
 
-## 🏗️ 개발 가이드라인 (Architecture Guidelines)
+`NODE_ENV=production`에서는 개발 라우트를 등록하지 않으며 시간 가속도 비활성화합니다. 스테이징 도구는 `ROADLAND_DEV_TOOLS=true`, `ROADLAND_DEV_TOKEN` 및 `x-roadland-dev-token` 인증을 함께 사용합니다. 인증키 없는 개발·테스트 도구를 외부에 공개하지 않습니다.
 
-### 💻 프론트엔드 개발 규칙 (FSD 아키텍처)
-* **FSD (Feature-Sliced Design)** 구조를 엄격히 준수합니다.
-* `app/` 레이어는 순수한 Next.js 라우터, 글로벌 스타일 및 프로바이더 주입에 집중하며 페이지 실제 마크업이나 복잡한 비즈니스 로직은 작성하지 않습니다.
-* 페이지 메인 뷰는 `views/` 레이어 아래 컴포넌트로 분리하고 `app/page.tsx`는 분리된 뷰를 가져와 단순 렌더링하는 진입점 역할만 담당합니다.
-* **공통 UI 컴포넌트 제약**: UI 컴포넌트는 개별 웹앱 내부가 아닌 `packages/ui`에서 `@roadland/ui`를 통해 불러와 사용하며, 원본 UI 컴포넌트 코드의 ad-hoc 수정은 지양합니다.
+## 보안과 라이선스
 
-### ⚙️ 백엔드 개발 규칙 (구조적 통일화)
-* **API 구조 표준**: 모든 Response는 `BaseResponse<T>` 인터페이스 규격(성공 시 `result: true, message, data`, 실패 시 `result: false, message, data: HttpError`)을 만족해야 합니다.
-  * 글로벌 필터 `HttpErrorFilter` 및 인터셉터 `TransformInterceptor`가 이를 자동으로 포매팅합니다.
-* **인증 시스템**:
-  * 모든 API 엔드포인트는 기본적으로 `@UseGuards(JwtAccessGuard)`가 전역 적용되어 보호됩니다. 인증이 필요 없는 공개 엔드포인트의 경우 `@Public()` 커스텀 데코레이터를 명시해주어야 합니다.
-  * OTP 등 민감한 인증 시도 구간은 브루트포스 예방을 위해 `ThrottlerGuard` 가드가 동시에 적용되어 있습니다.
+실제 `.env`, 개인 키·인증서·keystore, DB 백업, 의존성과 빌드 결과는 Git/Docker 제외 규칙으로 관리합니다. `envs/.env.example`과 테스트 전용 더미 `envs/.env.test`만 추적합니다. 새 비밀값을 커밋하기 전에 추적 상태와 과거 이력을 함께 확인하고, 유출 시 키 교체를 우선합니다. 과거 커밋에 남은 작성자 개인 이메일은 현재 파일의 제외 규칙과 별개입니다.
 
-### 🗄️ 데이터베이스 스키마 수정 규칙
-* 데이터베이스 설계 변경 시 `packages/database/prisma/schema` 폴더 아래 각 영역별 파일(예: `user.prisma`, `file.prisma` 등)을 수정하거나 생성합니다.
-* 파일 수정 후 `pnpm run db:generate` 명령을 통해 로컬 타이핑을 갱신해 주어야 합니다.
-
-### 🔀 마이그레이션 워크플로 (Migrations)
-
-스키마 이력은 `packages/database/prisma/migrations/` 가 **단일 진실 소스**입니다. 운영(`migrate deploy`)과 e2e 테스트가 이 마이그레이션을 적용하므로, 스키마 변경은 반드시 마이그레이션으로 기록해야 운영에 반영됩니다.
-
-| 상황 | 명령 |
-| :--- | :--- |
-| 로컬에서 빠르게 스키마 실험 (이력 X) | `pnpm --filter @roadland/database db:push` |
-| 스키마 확정 → 마이그레이션 기록 | `pnpm --filter @roadland/database db:migrate --name <변경명>` |
-| 운영/CI 에서 마이그레이션 적용 | `pnpm --filter @roadland/database db:deploy` (운영은 컨테이너 기동 시 자동 실행) |
-
-> [!CAUTION]
-> **기존 DB 를 마이그레이션으로 전환할 때(베이스라이닝):** 이 저장소는 `db push` 로 스키마를 관리하다 `0_init` 마이그레이션을 도입했습니다. 이미 `db push` 로 테이블이 생성된 **기존 운영/개발 DB** 에 곧바로 `migrate deploy` 를 실행하면 "테이블이 이미 존재" 오류가 납니다. 해당 DB 에 최초 1회만 아래로 베이스라인을 잡아주세요(테이블은 그대로 두고 이력만 기록):
-> ```bash
-> DATABASE_URL=<대상 DB> pnpm --filter @roadland/database exec prisma migrate resolve --applied 0_init
-> ```
-> 볼륨을 새로 만드는 신규 환경(및 fork)은 이 단계가 필요 없습니다 — `migrate deploy` 가 빈 DB 에 `0_init` 을 그대로 적용합니다.
+이 저장소의 프로젝트 전체 재사용 라이선스는 별도 지정하지 않았으며 API 패키지는 `UNLICENSED`로 표시되어 있습니다. NestJS·Prisma·Redis·PostgreSQL 등 의존성과 컨테이너 이미지의 사용·재배포 조건은 각 버전의 라이선스에 따릅니다. 이 README는 전체 서버 의존성의 라이선스 고지를 대신하지 않습니다.
