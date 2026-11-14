@@ -1,4 +1,4 @@
-import type { SubmitTripRequest } from "@template/shared";
+import type { SubmitTripRequest } from "@loadland/shared";
 
 import { hexDistance } from "./hex";
 

@@ -1,4 +1,4 @@
-import type { Role } from "@template/shared";
+import type { Role } from "@loadland/shared";
 
 export {};
 

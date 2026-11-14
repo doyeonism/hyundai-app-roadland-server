@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
-import { prisma } from "@template/database";
+import { prisma } from "@loadland/database";
 import {
   buildPaginatedData,
   resolvePagination,
@@ -7,7 +7,7 @@ import {
   type PaginationQuery,
   type Role,
   type UpdateUserRequest,
-} from "@template/shared";
+} from "@loadland/shared";
 
 import * as CONST from "../../shared/constants";
 import { RedisService } from "../../shared/redis/redis.service";

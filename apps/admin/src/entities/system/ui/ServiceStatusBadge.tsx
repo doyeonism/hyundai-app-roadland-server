@@ -1,4 +1,4 @@
-import { Badge } from "@template/ui";
+import { Badge } from "@loadland/ui";
 
 import type { ServiceHealth } from "../model/types";
 

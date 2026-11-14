@@ -8,8 +8,8 @@ import {
   FieldError,
   FieldLabel,
   Input,
-} from "@template/ui";
-import type { LoginRequest } from "@template/shared";
+} from "@loadland/ui";
+import type { LoginRequest } from "@loadland/shared";
 
 import { NOT_ADMIN, useLogin } from "../model/useLogin";
 

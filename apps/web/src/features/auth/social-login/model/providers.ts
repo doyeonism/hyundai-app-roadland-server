@@ -1,4 +1,4 @@
-import type { SocialProviderSlug } from "@template/shared";
+import type { SocialProviderSlug } from "@loadland/shared";
 import { apiUrl } from "@/shared/libs/axios/base-url";
 
 // 소셜 로그인은 XHR 이 아니라 브라우저 전체 리다이렉트(OAuth) 로 동작하므로,

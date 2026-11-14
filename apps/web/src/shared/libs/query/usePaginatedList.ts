@@ -1,6 +1,6 @@
 "use client";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import type { PaginationQuery } from "@template/shared";
+import type { PaginationQuery } from "@loadland/shared";
 
 import { GetList } from "@/shared/libs/axios/request";
 

@@ -1,4 +1,4 @@
-import type { Terms, UserTermsAgreement } from "@template/database";
+import type { Terms, UserTermsAgreement } from "@loadland/database";
 
 export interface TermsAgreementInput {
   termsId: string;

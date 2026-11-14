@@ -23,7 +23,7 @@ import {
   CardHeader,
   Spinner,
   Switch,
-} from "@template/ui";
+} from "@loadland/ui";
 
 import { Get } from "@/shared/libs/axios/request";
 import {

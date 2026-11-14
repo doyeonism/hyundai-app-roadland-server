@@ -14,8 +14,8 @@ import {
   CardContent,
   CardHeader,
   Spinner,
-} from "@template/ui";
-import type { UserSubscriptionDetail } from "@template/shared";
+} from "@loadland/ui";
+import type { UserSubscriptionDetail } from "@loadland/shared";
 
 import { usePaginatedList } from "@/shared/libs/query/usePaginatedList";
 import { SubscriptionStatusBadge } from "@/entities/subscription";

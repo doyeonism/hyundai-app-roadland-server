@@ -1,4 +1,4 @@
-import { Prisma, User, UserInfo as UserInfoModel } from "@template/database";
+import { Prisma, User, UserInfo as UserInfoModel } from "@loadland/database";
 import { AsCreateRequest, AsUpdateRequest } from "../";
 
 // API 응답에 절대 포함되면 안 되는 bcrypt 해시(password)를 제거한 User.

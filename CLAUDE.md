@@ -2,16 +2,16 @@
 
 ## 1. Reuse First
 
-- Check: `@template/shared` (types/utils) -> `@template/ui` (shadcn components) -> `@template/database` (prisma client/types).
+- Check: `@loadland/shared` (types/utils) -> `@loadland/ui` (shadcn components) -> `@loadland/database` (prisma client/types).
 - Do not build local components/helpers if they exist in packages.
-- Always use `@template/ui` components (`Button`, `Input`, `Label`, `Card`, `Field`, etc.) instead of raw HTML tags. Add generic logic to `@template/shared`.
+- Always use `@loadland/ui` components (`Button`, `Input`, `Label`, `Card`, `Field`, etc.) instead of raw HTML tags. Add generic logic to `@loadland/shared`.
 
 ## 2. API Contracts
 
 - Define request/response types in `packages/shared/types/contracts/<domain>.ts`.
 - **API**: NestJS DTO must `implements` the request type:
   ```ts
-  import type { CreateOrderRequest } from "@template/shared";
+  import type { CreateOrderRequest } from "@loadland/shared";
   export class CreateOrderDto implements CreateOrderRequest {}
   ```
 - **Web**: Import contract types for payloads and responses (`BaseResponse<T>`).
@@ -37,7 +37,7 @@
   );
   ```
 
-## 4. `@template/shared` Contents
+## 4. `@loadland/shared` Contents
 
 - Responses: `BaseResponse`, `BasicResponse`, `ErrorResponse`, `HttpError`
 - Contracts: `LoginRequest`, `SubmitOtpRequest`, `RefreshRequest`, `LoginResponse`, etc.

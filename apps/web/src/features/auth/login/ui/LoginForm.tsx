@@ -9,8 +9,8 @@ import {
   FieldError,
   FieldLabel,
   Input,
-} from "@template/ui";
-import type { LoginRequest } from "@template/shared";
+} from "@loadland/ui";
+import type { LoginRequest } from "@loadland/shared";
 
 import { SocialLoginButtons } from "@/features/auth/social-login";
 

@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { prisma } from "@template/database";
+import { prisma } from "@loadland/database";
 import * as fs from "fs";
 import * as path from "path";
 import { FileService } from "../../shared/file/services/file.service";

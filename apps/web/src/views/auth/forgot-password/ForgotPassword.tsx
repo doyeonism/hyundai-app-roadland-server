@@ -3,7 +3,7 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
-} from "@template/ui";
+} from "@loadland/ui";
 
 import { ForgotPasswordForm } from "@/features/auth/forgot-password";
 

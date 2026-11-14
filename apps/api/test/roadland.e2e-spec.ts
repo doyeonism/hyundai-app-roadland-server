@@ -2,7 +2,7 @@ import type { Server } from "node:http";
 import type { INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import request from "supertest";
-import { prisma, prismaConnect, prismaDisconnect } from "@template/database";
+import { prisma, prismaConnect, prismaDisconnect } from "@loadland/database";
 import type {
   CarHomeResponse,
   CarRankingResponse,
@@ -12,7 +12,7 @@ import type {
   SubmitTripRequest,
   TerritoryResponse,
   TripResult,
-} from "@template/shared";
+} from "@loadland/shared";
 
 import { AppModule } from "../src/shared/modules/app.module";
 import { setupApplication } from "../src/shared/configs/app.setup";

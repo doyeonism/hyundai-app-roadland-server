@@ -3,7 +3,7 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
-} from "@template/ui";
+} from "@loadland/ui";
 
 import { ResetPasswordForm } from "@/features/auth/reset-password";
 

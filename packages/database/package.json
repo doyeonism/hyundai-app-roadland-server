@@ -1,5 +1,5 @@
 {
-  "name": "@template/database",
+  "name": "@loadland/database",
   "private": true,
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

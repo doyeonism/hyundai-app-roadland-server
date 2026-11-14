@@ -1,7 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { createHash, randomBytes } from "node:crypto";
-import { prisma } from "@template/database";
-import type { RegisterDeviceResponse } from "@template/shared";
+import { prisma } from "@loadland/database";
+import type { RegisterDeviceResponse } from "@loadland/shared";
 
 import { RedisService } from "../../shared/redis/redis.service";
 import { vehicleTokenKey } from "../../shared/redis/keys";

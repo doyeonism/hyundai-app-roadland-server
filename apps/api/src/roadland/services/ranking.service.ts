@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import type { RankingBoard, RankingEntry } from "@template/shared";
+import type { RankingBoard, RankingEntry } from "@loadland/shared";
 
 import { RedisService } from "../../shared/redis/redis.service";
 import { landRankKey, weeklyRankKey } from "../../shared/redis/keys";
