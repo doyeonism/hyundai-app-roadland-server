@@ -208,9 +208,11 @@ services:
     container_name: ${PROJECT_NAME}-redis
     restart: unless-stopped
     # 운영 Redis 는 외부 포트를 노출하지 않고 내부 네트워크로만 접근합니다.
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
+    # 비밀번호는 환경변수로 넘겨 셸에서 따옴표로 감싼다. command 에 직접 넣으면
+    # 비어 있을 때 --requirepass 인자가 빠져 redis 가 바로 죽고, 공백·# 등이 있으면 인자가 쪼개진다.
+    command: ["sh", "-c", 'exec redis-server --appendonly yes --requirepass "$$REDIS_PASSWORD"']
     environment:
-      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?운영 .env(ENV_FILES) 에 REDIS_PASSWORD 가 필요합니다}
     logging: *default-logging
     volumes:
       - redisdata:/data
