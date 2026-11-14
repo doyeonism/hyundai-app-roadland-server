@@ -235,20 +235,35 @@ jobs:
           IMAGE_PREFIX: ${{ needs.changes.outputs.image_prefix }}
           GHCR_USER: ${{ github.actor }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # VM 의 저장소 위치. 비우면 접속 계정 홈 아래 저장소 이름 폴더(~/<repo>)를 쓴다.
+          APP_DIR: ${{ secrets.VM_APP_DIR }}
+          REPO_NAME: ${{ github.event.repository.name }}
+          REPO_SLUG: ${{ github.repository }}
         with:
           host: ${{ secrets.VM_HOST }}
           username: ${{ secrets.VM_USER }}
           key: ${{ secrets.VM_SSH_KEY }}
           port: ${{ secrets.VM_PORT }}
-          envs: ENV_FILE,PROJECT_NAME,NETWORK_NAME,IMAGE_PREFIX,GHCR_USER,GHCR_TOKEN
+          envs: ENV_FILE,PROJECT_NAME,NETWORK_NAME,IMAGE_PREFIX,GHCR_USER,GHCR_TOKEN,APP_DIR,REPO_NAME,REPO_SLUG
           script: |
             set -euo pipefail
 
-            # VM의 프로젝트 위치를 변경 해야합니다. monorepo-template -> Repository 이름으로
-            cd /srv/monorepo-template
+            APP_DIR="${APP_DIR:-$HOME/$REPO_NAME}"
+            echo "배포 위치: $APP_DIR"
+
+            # 처음 배포라 저장소가 없으면 clone 한다. VM 의 ~/.ssh/id_ed25519 가
+            # 이 저장소의 Deploy key 로 등록돼 있어야 한다(공개 저장소면 https 로 받는다).
+            if [ ! -d "$APP_DIR/.git" ]; then
+              mkdir -p "$(dirname "$APP_DIR")"
+              GIT_SSH_COMMAND="ssh -o StrictHostKeyChecking=accept-new" \
+                git clone --branch main "git@github.com:$REPO_SLUG.git" "$APP_DIR" \
+              || git clone --branch main "https://github.com/$REPO_SLUG.git" "$APP_DIR" \
+              || { echo "❌ $APP_DIR 에 저장소를 clone 하지 못했습니다. Deploy key 를 확인하세요."; exit 1; }
+            fi
+            cd "$APP_DIR"
 
             # compose / nginx 템플릿 등 설정 파일 최신화 (소스 빌드는 하지 않는다)
-            git pull origin main
+            GIT_SSH_COMMAND="ssh -o StrictHostKeyChecking=accept-new" git pull origin main
 
             # .env 생성 + 이미지 경로 기록 (VM 에서 수동으로 compose 를 써도 동작하도록)
             printf '%s\n' "$ENV_FILE" > .env
