@@ -5,36 +5,32 @@ import { hexDistance } from "./hex";
 // 게임 수치. 밸런스를 바꿀 때는 이 파일만 고친다. 차량 앱의 주행 중 예상 크레딧(Rules.kt)도 같은 값을 쓴다.
 export const RULES = {
   /** 처음 등록한 차량에 주는 크레딧. 첫 땅 하나를 바로 살 수 있게. */
-  welcomeCredits: 100,
+  welcomeCredits: 2000,
   /** 안전하게 지나간 타일 한 칸(약 10m)의 크레딧. 1km에 대략 60~80칸. */
-  tileCredit: 2,
+  tileCredit: 40,
   /** 에코 모드·크루즈로 지나간 타일의 추가 비율. */
   assistBonus: 0.5,
   /** 차선 변경 때 깜빡이 사용률이 이 이상이면 매너 보너스. */
   mannerSignalRate: 0.8,
   mannerBonus: 0.2,
   /** 하루 주행으로 받는 크레딧 상한. 오래 달리는 것이 최적 전략이 되지 않게 한다. */
-  dailyDriveCap: 400,
-  /** 주인 없는 땅의 값 = 이 값 × (내가 가진 땅 수 + 1). 첫 땅은 5, 땅이 늘수록 비싸져 끝없이 불어나지 않게 한다. */
-  buyBaseCost: 5,
+  dailyDriveCap: 8000,
+  /** 주인 없는 땅의 값 = 이 값 × (내가 가진 땅 수 + 1). 첫 땅은 100, 땅이 늘수록 비싸져 끝없이 불어나지 않게 한다. */
+  buyBaseCost: 100,
   /** 주인 있는 땅은 마지막 거래가보다 이만큼 더 내야 산다. 낸 돈은 누구에게도 가지 않는다. */
-  buyRaise: 5,
-  /** 업그레이드 값 = upgradeCostBase × upgradeCostGrowth^(지금 레벨 − 1). 레벨 1→2는 40, 높을수록 가파르게 비싸진다. */
-  upgradeCostBase: 40,
+  buyRaise: 100,
+  /** 업그레이드 값 = upgradeCostBase × upgradeCostGrowth^(지금 레벨 − 1). 레벨 1→2는 800, 높을수록 가파르게 비싸진다. */
+  upgradeCostBase: 800,
   upgradeCostGrowth: 1.15,
   maxTileLevel: 60,
-  /**
-   * 땅 한 칸이 1시간마다 주는 크레딧 = 레벨 × (기본값 + 그 칸을 지나간 주행 중 안전 점수가 기준을 넘은 수 − 넘지 못한 수).
-   * 괄호 안은 incomeMin ~ incomeMax.
-   */
-  incomeBase: 5,
-  incomeMin: 1,
-  incomeMax: 10,
-  incomeGoodScore: 80, // 이 점수를 넘으면 +1, 아니면 −1
+  /** 하루 기본 수익은 종전 시간당 기본값 5 × 24시간 × 20. 레벨마다 하루 +1. */
+  dailyLandBase: 2400,
+  dailyLandLevelBonus: 1,
+  incomeGoodScore: 80, // 방문 기록 통계에만 사용, 땅 수익과 무관
   /** 최근 7일 중 이 일수 이상 지나간 타일은 홈 루트(자주 다니는 길 표시). */
   homeRouteDays: 3,
   /** 방치 수익이 쌓이는 최대 시간. 정기적인 탑승과 수령을 유도한다. */
-  idleCapHours: 12,
+  idleCapHours: 24,
   /** 안전 연속 기록으로 치는 점수. */
   safeStreakScore: 90,
   /** 기록 검증: 이보다 빠른 평균 속도나 거리 대비 너무 많은 타일은 보상하지 않는다. */
@@ -122,38 +118,36 @@ export function isHomeRoute(tile: Pick<TileState, "visitDays">, today: string) {
   return tile.visitDays.filter((d) => d >= since && d <= today).length >= RULES.homeRouteDays;
 }
 
-/** 주행 안전 점수가 땅 수익에 더해지는(넘으면) 쪽인지. */
+/** 방문 기록의 안전 점수 분류. 땅 수익에는 영향을 주지 않는다. */
 export function isGoodTrip(safetyScore: number) {
   return safetyScore > RULES.incomeGoodScore;
 }
 
-/** 이 땅이 1시간마다 주는 크레딧. 레벨 × (기본 + 좋은 주행 − 나쁜 주행, 최소~최대로 자름). */
-export function incomePerHour(tile: Pick<TileState, "level" | "goodTrips" | "badTrips">) {
+/** 같은 레벨이면 방문 기록과 관계없이 동일한 하루 수익. */
+export function incomePerDay(tile: Pick<TileState, "level">) {
   if (tile.level <= 0) return 0;
-  const perLevel = Math.min(RULES.incomeMax, Math.max(RULES.incomeMin, RULES.incomeBase + tile.goodTrips - tile.badTrips));
-  return tile.level * perLevel;
+  return RULES.dailyLandBase + (Math.min(tile.level, RULES.maxTileLevel) - 1) * RULES.dailyLandLevelBonus;
 }
 
-/** 마지막 수령 뒤 다 채운 시간 수. 상한 시간까지만 센다. */
-function paidHours(collectedAt: Date, now: Date) {
-  const hours = Math.floor(Math.max(0, now.getTime() - collectedAt.getTime()) / HOUR);
-  return Math.min(hours, RULES.idleCapHours);
+/** 기존 클라이언트 호환용 시간당 환산값. 실제 지급은 하루 수익으로 계산한다. */
+export function incomePerHour(tile: Pick<TileState, "level">) {
+  return incomePerDay(tile) / 24;
 }
 
-/** 마지막 수령 뒤 쌓인 수익. 1시간이 다 차야 들어오고, 상한 시간까지만 쌓인다. */
+/** 최대 24시간까지 적립. 정수 크레딧만 지급하고 나머지 시간은 수령 시 보존. */
 export function pendingIncome(tile: Pick<TileState, "level" | "goodTrips" | "badTrips" | "collectedAt">, now: Date) {
-  if (tile.level <= 0 || !tile.collectedAt) return 0;
-  return incomePerHour(tile) * paidHours(tile.collectedAt, now);
+  if (!tile.collectedAt) return 0;
+  const elapsed = Math.min(Math.max(0, now.getTime() - tile.collectedAt.getTime()), RULES.idleCapHours * HOUR);
+  return Math.floor(incomePerDay(tile) * elapsed / (24 * HOUR));
 }
 
-/**
- * 수령한 뒤의 새 기준 시각. 아직 1시간이 안 찬 몫은 남겨 다음 수령에 넘긴다.
- * 상한까지 쌓였으면 그 뒤로는 쌓이지 않았으므로 지금부터 다시 센다.
- */
-export function collectedUntil(collectedAt: Date, now: Date) {
-  const hours = paidHours(collectedAt, now);
-  if (hours >= RULES.idleCapHours) return now;
-  return new Date(collectedAt.getTime() + hours * HOUR);
+export function collectedUntil(collectedAt: Date, now: Date, tile: Pick<TileState, "level">) {
+  const elapsed = Math.max(0, now.getTime() - collectedAt.getTime());
+  if (elapsed >= RULES.idleCapHours * HOUR) return now;
+  const rate = incomePerDay(tile);
+  if (rate === 0) return collectedAt;
+  const paid = Math.floor(rate * elapsed / (24 * HOUR));
+  return new Date(collectedAt.getTime() + Math.ceil(paid * 24 * HOUR / rate));
 }
 
 /**
@@ -166,5 +160,5 @@ export function buyCost(lastPrice: number | null, ownedCount: number) {
 
 export function upgradeCost(level: number) {
   if (level < 1 || level >= RULES.maxTileLevel) return null;
-  return Math.round(RULES.upgradeCostBase * RULES.upgradeCostGrowth ** (level - 1));
+  return 20 * Math.round((RULES.upgradeCostBase / 20) * RULES.upgradeCostGrowth ** (level - 1));
 }

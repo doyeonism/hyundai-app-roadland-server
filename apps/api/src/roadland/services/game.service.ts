@@ -17,6 +17,7 @@ import {
   buyCost,
   collectedUntil,
   incomePerHour,
+  incomePerDay,
   isGoodTrip,
   isHomeRoute,
   pendingIncome,
@@ -83,8 +84,13 @@ export class GameService {
     const owned = tiles.filter((t) => t.owned);
     return {
       credits: vehicle.credits,
+      personalLevel: vehicle.personalLevel,
+      personalUpgradeCost: upgradeCost(vehicle.personalLevel),
+      incomePerTilePerDay: incomePerDay({level: vehicle.personalLevel}),
+      nextIncomePerTilePerDay: upgradeCost(vehicle.personalLevel) === null ? null : incomePerDay({level: vehicle.personalLevel + 1}),
       pendingIncome: owned.reduce((n, t) => n + t.pending, 0),
       incomePerHour: owned.reduce((n, t) => n + t.incomePerHour, 0),
+      incomePerDay: owned.reduce((n, t) => n + (t.incomePerDay ?? 0), 0),
       idleCapHours: RULES.idleCapHours,
       ownedTiles: owned.length,
       buyableTiles: tiles.filter((t) => t.buyCost !== null).length,
@@ -271,9 +277,10 @@ export class GameService {
           } else {
             const owned = await tx.ownedTile.findUniqueOrThrow({ where: { q_r: key } });
             const record = await tx.tileRecord.findUnique({ where: { vehicleId_q_r: { vehicleId: owned.vehicleId, ...key } } });
+            const previousOwner = await tx.vehicle.findUniqueOrThrow({where: {id: owned.vehicleId}});
             const pending = pendingIncome(
               {
-                level: owned.level,
+                level: previousOwner.personalLevel,
                 collectedAt: owned.collectedAt,
                 goodTrips: record?.goodTrips ?? 0,
                 badTrips: record?.badTrips ?? 0,
@@ -302,23 +309,31 @@ export class GameService {
     return view;
   }
 
-  async upgrade(vehicleId: string, id: string): Promise<LandTileView> {
+  /** 구버전 클라이언트가 땅별 레벨을 결제하지 않도록 명시적으로 거절한다. */
+  async upgrade(_vehicleId: string, _id: string): Promise<LandTileView> {
+    throw new BadRequestException("홈에서 개인 레벨을 올려 주세요");
+  }
+
+  async upgradePersonal(vehicleId: string, expectedLevel: number): Promise<CarHomeResponse> {
+    if (!Number.isInteger(expectedLevel) || expectedLevel < 1 || expectedLevel > 60) {
+      throw new BadRequestException("현재 개인 레벨을 확인해 주세요");
+    }
     return this.lock.run(vehicleId, async () => {
       const now = await this.clock.now(vehicleId);
-      const view = await prisma.$transaction(async (tx) => {
-        const tile = (await this.views(tx, vehicleId, now)).find((t) => t.id === id);
-        if (!tile || tile.upgradeCost === null) throw new BadRequestException("더 올릴 수 없는 땅이에요");
-        // 올리기 전까지 쌓인 수익은 먼저 받는다(레벨이 바뀌어 계산이 꼬이지 않게).
-        if (tile.pending > 0) await this.earn(tx, vehicleId, tile.pending, "COLLECT", id);
-        await this.spend(tx, vehicleId, tile.upgradeCost, "UPGRADE", id);
-        await tx.ownedTile.updateMany({
-          where: { vehicleId, ...parseTileId(id) },
-          data: { level: { increment: 1 }, collectedAt: collectedUntil(new Date(tile.collectedAt!), now) },
-        });
-        return this.view(tx, vehicleId, id, now);
+      await prisma.$transaction(async tx => {
+        const vehicle = await tx.vehicle.findUniqueOrThrow({where: {id: vehicleId}});
+        if (vehicle.personalLevel !== expectedLevel) throw new ConflictException("레벨이 변경됐어요. 새로고침해 주세요");
+        const cost = upgradeCost(vehicle.personalLevel);
+        if (cost === null) throw new BadRequestException("이미 최고 레벨이에요");
+        // 보유 잔액으로 먼저 결제한다. 부족하면 아래 수익 정산과 레벨 변경도 전부 취소된다.
+        await this.spend(tx, vehicleId, cost, "PERSONAL_UPGRADE", String(expectedLevel + 1));
+        const owned = (await this.views(tx, vehicleId, now)).filter(t => t.owned);
+        const pending = owned.reduce((sum, t) => sum + t.pending, 0);
+        if (pending > 0) await this.earn(tx, vehicleId, pending, "COLLECT", null);
+        await tx.ownedTile.updateMany({where: {vehicleId}, data: {collectedAt: now}});
+        await tx.vehicle.update({where: {id: vehicleId}, data: {personalLevel: {increment: 1}}});
       });
-      await this.refreshLand(vehicleId);
-      return view;
+      return this.home(vehicleId);
     });
   }
 
@@ -332,7 +347,7 @@ export class GameService {
         // 땅마다 다 찬 분만큼만 기준 시각을 옮긴다(1분이 안 찬 몫은 남긴다). 같은 시각끼리 묶어 갱신한다.
         const groups = new Map<number, { q: number; r: number }[]>();
         for (const t of owned) {
-          const until = collectedUntil(new Date(t.collectedAt!), now).getTime();
+          const until = collectedUntil(new Date(t.collectedAt!), now, t).getTime();
           groups.set(until, [...(groups.get(until) ?? []), parseTileId(t.id)]);
         }
         for (const [until, keys] of groups) {
@@ -370,13 +385,14 @@ export class GameService {
 
   /** 이 차가 지나간 적이 있거나 이 차의 땅인 타일. 지나간 칸에 다른 차가 주인이면 그 거래가도 붙인다. */
   private async tiles(db: Db, vehicleId: string): Promise<Map<string, TileInfo>> {
-    const [visits, records, owned] = await Promise.all([
+    const [visits, records, owned, vehicle] = await Promise.all([
       db.tileVisit.findMany({ where: { vehicleId }, select: { q: true, r: true, day: true }, orderBy: { day: "asc" } }),
       db.tileRecord.findMany({ where: { vehicleId } }),
       db.$queryRaw<OwnedRow[]>`
         SELECT o.q, o.r, o.vehicle_id, o.price, o.level, o.collected_at, o.traded_at FROM owned_tiles o
         WHERE o.vehicle_id = ${vehicleId}
            OR EXISTS (SELECT 1 FROM tile_visits v WHERE v.vehicle_id = ${vehicleId} AND v.q = o.q AND v.r = o.r)`,
+      db.vehicle.findUniqueOrThrow({where: {id: vehicleId}}),
     ]);
     const map = new Map<string, TileInfo>();
     const get = (id: string) => {
@@ -408,7 +424,7 @@ export class GameService {
       t.price = o.price;
       t.tradedAt = o.traded_at;
       if (o.vehicle_id === vehicleId) {
-        t.level = o.level;
+        t.level = vehicle.personalLevel;
         t.collectedAt = o.collected_at;
       }
     }
@@ -475,10 +491,12 @@ function toView(t: TileInfo, vehicleId: string, ownedByMe: number, now: Date): L
     goodTrips: t.goodTrips,
     badTrips: t.badTrips,
     incomePerHour: incomePerHour(t),
+    incomePerDay: incomePerDay(t),
+    nextLevelIncomePerDay: null,
     pending: pendingIncome(t, now),
     mustRevisit: visited && revisit,
     buyCost: !owned && visited && !revisit ? buyCost(t.price, ownedByMe) : null,
-    upgradeCost: owned ? upgradeCost(t.level) : null,
+    upgradeCost: null,
   };
 }
 

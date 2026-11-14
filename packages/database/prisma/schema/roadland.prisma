@@ -7,6 +7,7 @@ model Vehicle {
   // 기기 토큰의 sha256. 원본 토큰은 차에만 있다.
   tokenHash      String   @unique @map("token_hash")
   credits        Int      @default(0)
+  personalLevel  Int      @default(1) @map("personal_level")
   safeStreak     Int      @default(0) @map("safe_streak")
   bestSafeStreak Int      @default(0) @map("best_safe_streak")
 

@@ -75,6 +75,15 @@ export class CarController {
     return this.game.upgrade(vehicleId, id);
   }
 
+  @Post("profile/upgrade")
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(VehicleGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: "개인 레벨업: 모든 소유지의 하루 수익 +1" })
+  upgradePersonal(@VehicleId() vehicleId: string, @Body("expectedLevel") expectedLevel: number) {
+    return this.game.upgradePersonal(vehicleId, expectedLevel);
+  }
+
   @Post(R.COLLECT)
   @HttpCode(HttpStatus.OK)
   @UseGuards(VehicleGuard)

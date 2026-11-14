@@ -6,6 +6,7 @@ import {
   collectedUntil,
   daysAgo,
   incomePerHour,
+  incomePerDay,
   isGoodTrip,
   isHomeRoute,
   pendingIncome,
@@ -99,50 +100,46 @@ describe("땅과 방치 수익", () => {
     expect(isHomeRoute({ visitDays: [daysAgo(today, 8), daysAgo(today, 9), daysAgo(today, 10)] }, today)).toBe(false);
   });
 
-  it("땅 수익은 1시간마다 레벨 × (5 + 80점 넘은 주행 − 아닌 주행), 괄호는 1~10", () => {
-    const tile = (level: number, goodTrips: number, badTrips: number) => ({ level, goodTrips, badTrips });
-    expect(incomePerHour(tile(1, 0, 0))).toBe(5);
-    expect(incomePerHour(tile(1, 3, 1))).toBe(7);
-    expect(incomePerHour(tile(1, 0, 4))).toBe(1);
-    expect(incomePerHour(tile(1, 0, 9))).toBe(1); // 최소 1
-    expect(incomePerHour(tile(1, 30, 0))).toBe(10); // 최대 10: 같은 길을 오래 다녀도 끝없이 늘지 않는다
-    expect(incomePerHour(tile(3, 2, 0))).toBe(3 * 7); // 레벨은 곱한다
-    expect(incomePerHour(tile(0, 5, 0))).toBe(0); // 내 땅이 아니면 0
+  it("하루 기본 수익은 2400이며 레벨마다 정확히 1씩 오른다", () => {
+    expect(incomePerDay({level: 0})).toBe(0);
+    for (let level = 1; level <= 60; level++) {
+      expect(incomePerDay({level})).toBe(2400 + level - 1);
+    }
+    expect(incomePerHour({level: 1})).toBe(100);
     expect(isGoodTrip(81)).toBe(true);
-    expect(isGoodTrip(80)).toBe(false); // 80점은 넘지 못한 주행
+    expect(isGoodTrip(80)).toBe(false);
   });
 
-  it("쌓인 수익은 1시간이 다 차야 들어오고, 상한 시간까지만 쌓인다", () => {
-    const now = new Date("2026-11-02T12:00:00+09:00");
-    const tile = (min: number, level = 1) => ({ level, goodTrips: 0, badTrips: 0, collectedAt: new Date(now.getTime() - min * 60_000) });
-    expect(pendingIncome(tile(59), now)).toBe(0);
-    expect(pendingIncome(tile(60), now)).toBe(RULES.incomeBase);
-    expect(pendingIncome(tile(150, 3), now)).toBe(2 * 3 * RULES.incomeBase);
-    expect(pendingIncome(tile(100 * 60), now)).toBe(RULES.idleCapHours * RULES.incomeBase);
-    expect(pendingIncome({ level: 0, goodTrips: 0, badTrips: 0, collectedAt: null }, now)).toBe(0);
+  it("24시간 수익, 상한, 수령 후 잔여 시간과 중복 지급을 검증한다", () => {
+    const start = new Date("2026-11-09T00:00:00Z");
+    const tile = {level: 2, goodTrips: 0, badTrips: 999, collectedAt: start};
+    const day = new Date(start.getTime() + 86400000);
+    expect(pendingIncome(tile, day)).toBe(2401);
+    expect(pendingIncome(tile, new Date(day.getTime() + 86400000))).toBe(2401);
+    expect(pendingIncome({...tile, goodTrips: 999, badTrips: 0}, day)).toBe(2401);
+    expect(pendingIncome(tile, new Date(start.getTime() - 1))).toBe(0);
+    const now = new Date(start.getTime() + 1234567);
+    const paid = pendingIncome(tile, now);
+    const until = collectedUntil(start, now, tile);
+    expect(pendingIncome({...tile, collectedAt: until}, now)).toBe(0);
+    expect(paid + pendingIncome({...tile, collectedAt: until}, day)).toBeLessThanOrEqual(2401);
+    expect(paid + pendingIncome({...tile, collectedAt: until}, day)).toBeGreaterThanOrEqual(2400);
+    expect(collectedUntil(start, day, tile)).toEqual(day);
   });
 
-  it("수령해도 아직 1시간이 안 찬 몫은 다음으로 넘긴다", () => {
-    const now = new Date("2026-11-02T12:00:00+09:00");
-    const at = (min: number) => new Date(now.getTime() - min * 60_000);
-    expect(collectedUntil(at(150), now)).toEqual(at(30)); // 2시간 받고 30분 남김
-    expect(collectedUntil(at(30), now)).toEqual(at(30));
-    expect(collectedUntil(at(100 * 60), now)).toEqual(now); // 상한에 닿았으면 지금부터
+  it("빈 땅은 100 × (가진 땅 + 1), 주인 있는 땅은 마지막 거래가 + 100", () => {
+    expect(buyCost(null, 0)).toBe(100);
+    expect(buyCost(null, 1)).toBe(200);
+    expect(buyCost(null, 99)).toBe(10000);
+    expect(buyCost(100, 0)).toBe(200); // 빼앗을 때는 가진 땅 수와 상관없다
+    expect(buyCost(200, 50)).toBe(300);
   });
 
-  it("빈 땅은 5 × (가진 땅 + 1), 주인 있는 땅은 마지막 거래가 + 5", () => {
-    expect(buyCost(null, 0)).toBe(5);
-    expect(buyCost(null, 1)).toBe(10);
-    expect(buyCost(null, 99)).toBe(500);
-    expect(buyCost(5, 0)).toBe(10); // 빼앗을 때는 가진 땅 수와 상관없다
-    expect(buyCost(10, 50)).toBe(15);
-  });
-
-  it("업그레이드 값은 40에서 레벨마다 1.15배, 최고 레벨 60은 더 올릴 수 없다", () => {
-    expect(upgradeCost(1)).toBe(40);
-    expect(upgradeCost(2)).toBe(46);
-    expect(upgradeCost(30)).toBe(Math.round(40 * 1.15 ** 29));
-    expect(upgradeCost(59)).toBe(132_597); // 1→60 전체는 약 100만
+  it("업그레이드 값은 800에서 레벨마다 1.15배, 최고 레벨 60은 더 올릴 수 없다", () => {
+    expect(upgradeCost(1)).toBe(800);
+    expect(upgradeCost(2)).toBe(920);
+    expect(upgradeCost(30)).toBe(20 * Math.round(40 * 1.15 ** 29));
+    expect(upgradeCost(59)).toBe(2_651_940); // 1→60 전체는 약 100만
     expect(RULES.maxTileLevel).toBe(60);
     expect(upgradeCost(RULES.maxTileLevel)).toBeNull();
     expect(upgradeCost(0)).toBeNull();

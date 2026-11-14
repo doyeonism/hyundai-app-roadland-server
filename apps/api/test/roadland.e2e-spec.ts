@@ -18,7 +18,7 @@ import { AppModule } from "../src/shared/modules/app.module";
 import { setupApplication } from "../src/shared/configs/app.setup";
 import { RedisService } from "../src/shared/redis/redis.service";
 import { routeTiles, COMMUTE } from "../src/roadland/domain/places";
-import { RULES } from "../src/roadland/domain/rules";
+import { RULES, incomePerDay } from "../src/roadland/domain/rules";
 
 const CAR = `/api/${process.env.PROJECT_NAME}/v1/car`;
 
@@ -85,6 +85,8 @@ describe("Roadland car API (e2e)", () => {
   it("등록하면 환영 크레딧으로 시작한다", async () => {
     const home = await get<CarHomeResponse>("/home");
     expect(home.credits).toBe(RULES.welcomeCredits);
+    expect(home.personalLevel).toBe(1);
+    expect(home.personalUpgradeCost).toBe(800);
     expect(home.ownedTiles).toBe(0);
     expect(home.latestTrip).toBeNull();
   });
@@ -123,7 +125,7 @@ describe("Roadland car API (e2e)", () => {
       .expect(400);
   });
 
-  it("지나간 빈 땅을 5에 사고, 크레딧이 모자라면 안내 문구로 거절한다", async () => {
+  it("지나간 빈 땅을 100에 사고, 크레딧이 모자라면 안내 문구로 거절한다", async () => {
     const before = await get<CarHomeResponse>("/home");
     const tile = await post<LandTileView>(`/tiles/${commute[0]}/buy`);
     expect(tile.owned).toBe(true);
@@ -137,10 +139,14 @@ describe("Roadland car API (e2e)", () => {
     await prisma.vehicle.update({ where: { id: vehicleId }, data: { credits: 0 } });
     const res = await request(server()).post(`${CAR}/tiles/${commute[1]}/buy`).set(auth()).expect(400);
     expect((res.body as Body<unknown>).message).toBe("크레딧이 부족해요");
-    await prisma.vehicle.update({ where: { id: vehicleId }, data: { credits: 500 } });
+    const levelBefore = (await get<TerritoryResponse>("/territory")).tiles.find(t => t.id === commute[0])!.level;
+    await request(server()).post(`${CAR}/profile/upgrade`).set(auth()).send({expectedLevel: 1}).expect(400);
+    expect((await get<CarHomeResponse>("/home")).credits).toBe(0);
+    expect((await get<TerritoryResponse>("/territory")).tiles.find(t => t.id === commute[0])!.level).toBe(levelBefore);
+    await prisma.vehicle.update({ where: { id: vehicleId }, data: { credits: 50000 } });
   });
 
-  it("같은 땅을 동시에 사도 한 번만 사고, 빈 땅값은 가진 땅마다 5씩 오른다", async () => {
+  it("같은 땅을 동시에 사도 한 번만 사고, 빈 땅값은 가진 땅마다 100씩 오른다", async () => {
     const id = commute[2];
     const codes = await Promise.all(
       [0, 1, 2].map(async () => (await request(server()).post(`${CAR}/tiles/${id}/buy`).set(auth())).status),
@@ -152,34 +158,42 @@ describe("Roadland car API (e2e)", () => {
     expect(next.buyCost).toBe(RULES.buyBaseCost * 3); // 두 칸을 가졌으니 세 번째는 15
   });
 
-  // 80점 넘은 주행이 한 번 지나간 칸이라 레벨 1 기준 1시간에 5 + 1.
-  const rate = RULES.incomeBase + 1;
+  // 레벨 1의 시간당 환산 수익.
+  const rate = RULES.dailyLandBase / 24;
 
-  it("내 땅은 1시간마다 레벨 × (5 + 주행 점수 보정)을 벌고, 업그레이드는 쌓인 수익을 먼저 준다", async () => {
+  it("하루 수익은 레벨마다 1 증가하며 업그레이드 비용을 차감한다", async () => {
     await request(server()).post(`${CAR}/dev/vehicles/${vehicleId}/advance`).send({ hours: 2 }).expect(200);
     const home = await get<CarHomeResponse>("/home");
     expect(home.incomePerHour).toBe(2 * rate);
     expect(home.pendingIncome).toBe(2 * 2 * rate); // 두 칸 × 2시간
 
     const before = home.credits;
-    const tile = await post<LandTileView>(`/tiles/${commute[0]}/upgrade`);
-    expect(tile.level).toBe(2);
-    expect(tile.pending).toBe(0);
+    const replies = await Promise.all([0, 1, 2].map(() => request(server()).post(`${CAR}/profile/upgrade`).set(auth()).send({expectedLevel: 1})));
+    expect(replies.filter(r => r.status === 200)).toHaveLength(1);
+    expect(replies.filter(r => r.status === 409)).toHaveLength(2);
+    const profile = (replies.find(r => r.status === 200)!.body as Body<CarHomeResponse>).data;
+    expect(profile.personalLevel).toBe(2);
+    expect(profile.incomePerTilePerDay).toBe(2401);
+    expect(profile.nextIncomePerTilePerDay).toBe(2402);
+    const owned = (await get<TerritoryResponse>("/territory")).tiles.filter(t => t.owned);
+    expect(owned.every(t => t.incomePerDay === 2401 && t.upgradeCost === null)).toBe(true);
+    expect(owned.every(t => t.pending === 0)).toBe(true);
+    await request(server()).post(`${CAR}/tiles/${commute[0]}/upgrade`).set(auth()).expect(400);
     const after = await get<CarHomeResponse>("/home");
-    expect(after.credits).toBe(before + 2 * rate - RULES.upgradeCostBase);
+    expect(after.credits).toBe(before + 4 * rate - RULES.upgradeCostBase);
 
     await request(server()).post(`${CAR}/dev/vehicles/${vehicleId}/advance`).send({ hours: 24 }).expect(200);
     const c = await post<CollectResponse>("/collect");
-    expect(c.collected).toBe(RULES.idleCapHours * (2 + 1) * rate);
+    expect(c.collected).toBe(2 * incomePerDay({level: 2}));
     expect((await get<CarHomeResponse>("/home")).pendingIncome).toBe(0);
   });
 
   it("땅 랭킹은 Redis 에서 레벨 합으로 보여 준다", async () => {
     const r = await get<CarRankingResponse>("/ranking");
-    expect(r.land.mine).toMatchObject({ rank: 1, score: 3, me: true });
+    expect(r.land.mine).toMatchObject({ rank: 1, score: 2, me: true });
   });
 
-  it("다른 차는 내 땅을 거래가 + 5에 빼앗고, 나는 쌓인 수익을 받은 뒤 땅이 레벨 1로 넘어간다", async () => {
+  it("다른 차는 내 땅을 거래가 + 100에 빼앗고, 나는 쌓인 수익을 받은 뒤 땅이 레벨 1로 넘어간다", async () => {
     const reg = await request(server()).post(`${CAR}/devices`).expect(201);
     const other = (reg.body as Body<RegisterDeviceResponse>).data;
     const as = (t: string) => ({ Authorization: `Bearer ${t}` });
@@ -198,28 +212,40 @@ describe("Roadland car API (e2e)", () => {
     const tile = (bought.body as Body<LandTileView>).data;
     expect(tile).toMatchObject({ owned: true, level: 1, price: RULES.buyBaseCost + RULES.buyRaise });
     const otherHome = (await request(server()).get(`${CAR}/home`).set(as(other.token)).expect(200)).body as Body<CarHomeResponse>;
-    expect(otherHome.data.credits).toBe(RULES.welcomeCredits + otherHome.data.latestTrip!.credits - 10);
+    expect(otherHome.data.credits).toBe(RULES.welcomeCredits + otherHome.data.latestTrip!.credits - 200);
 
     // 나는 그 땅(레벨 2)에 쌓인 1시간 수익을 받고, 땅은 다른 차 것으로 보인다.
     const mineAfter = await get<CarHomeResponse>("/home");
-    expect(mineAfter.credits).toBe(mineBefore.credits + 2 * rate);
+    expect(mineAfter.credits).toBe(mineBefore.credits + Math.floor(incomePerDay({level: 2}) / 24));
     const view = (await get<TerritoryResponse>("/territory")).tiles.find((t) => t.id === target)!;
     // 예전에 지나간 기록은 거래 전이라 다시 지나가야 살 수 있다.
-    expect(view).toMatchObject({ owned: false, ownedByOther: true, level: 0, price: 10, buyCost: null, mustRevisit: true });
+    expect(view).toMatchObject({ owned: false, ownedByOther: true, level: 0, price: 200, buyCost: null, mustRevisit: true });
     const refused = await request(server()).post(`${CAR}/tiles/${target}/buy`).set(auth()).expect(400);
     expect((refused.body as Body<unknown>).message).toBe("주인이 바뀐 뒤에 다시 지나가야 살 수 있어요");
     await post<TripResult>("/trips", trip(), 201);
     const again = (await get<TerritoryResponse>("/territory")).tiles.find((t) => t.id === target)!;
-    expect(again).toMatchObject({ mustRevisit: false, buyCost: 15 });
+    expect(again).toMatchObject({ mustRevisit: false, buyCost: 300 });
 
     // 다시 빼앗으면 15. 낸 돈은 누구에게도 가지 않는다.
     const otherBefore = otherHome.data.credits;
     const back = await post<LandTileView>(`/tiles/${target}/buy`);
-    expect(back).toMatchObject({ owned: true, level: 1, price: 15 });
+    expect(back).toMatchObject({ owned: true, level: 2, price: 300, incomePerDay: 2401 });
     const otherAfter = (await request(server()).get(`${CAR}/home`).set(as(other.token)).expect(200)).body as Body<CarHomeResponse>;
     expect(otherAfter.data.credits).toBe(otherBefore); // 방금 산 땅이라 쌓인 수익 없음
     const r = await get<CarRankingResponse>("/ranking");
     expect(r.land.mine?.score).toBe(2); // 레벨 1 두 칸
+  });
+
+  it("최고 개인 레벨과 잘못된 요청은 결제 없이 거절한다", async () => {
+    const before = (await get<CarHomeResponse>("/home")).credits;
+    await prisma.vehicle.update({where: {id: vehicleId}, data: {personalLevel: 60}});
+    const home = await get<CarHomeResponse>("/home");
+    expect(home.personalUpgradeCost).toBeNull();
+    expect(home.incomePerTilePerDay).toBe(2459);
+    await request(server()).post(`${CAR}/profile/upgrade`).set(auth()).send({expectedLevel: 60}).expect(400);
+    await request(server()).post(`${CAR}/profile/upgrade`).set(auth()).send({expectedLevel: -1}).expect(400);
+    await request(server()).post(`${CAR}/profile/upgrade`).set(auth()).send({}).expect(400);
+    expect((await get<CarHomeResponse>("/home")).credits).toBe(before);
   });
 
   it("서버에서 지운 차량의 토큰은 바로 막힌다", async () => {
