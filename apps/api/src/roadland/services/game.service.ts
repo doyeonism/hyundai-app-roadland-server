@@ -285,7 +285,7 @@ export class GameService {
           await lockVehicles(tx, [vehicleId, ...(prevOwner ? [prevOwner] : [])]);
           const all = await this.tiles(tx, vehicleId);
           const tile = all.get(id);
-          if (!tile || tile.lastPassedAt === null) throw new BadRequestException("직접 지나간 땅만 살 수 있어요");
+          if (!tile || !hasVisited(tile)) throw new BadRequestException("직접 지나간 땅만 살 수 있어요");
           if (tile.ownerId === vehicleId) throw new BadRequestException("이미 내 땅이에요");
           if (tile.ownerId !== prevOwner) throw new ConflictException("방금 주인이 바뀌었어요. 다시 확인해 주세요");
           if (mustRevisit(tile)) throw new BadRequestException("주인이 바뀐 뒤에 다시 지나가야 살 수 있어요");
@@ -500,7 +500,7 @@ function ownedCount(tiles: Iterable<TileInfo>, vehicleId: string) {
 
 function toView(t: TileInfo, vehicleId: string, ownedByMe: number, now: Date): LandTileView {
   const owned = t.ownerId === vehicleId;
-  const visited = t.lastPassedAt !== null;
+  const visited = hasVisited(t);
   const revisit = !owned && mustRevisit(t);
   return {
     id: t.id,
@@ -543,4 +543,9 @@ export function toTripResult(t: VehicleTrip): TripResult {
     rejectReason: t.rejectReason,
     rulesVersion: t.rulesVersion,
   };
+}
+
+/** Older visit rows may predate last_passed_at; retain their purchase eligibility. */
+function hasVisited(t: TileInfo) {
+  return t.lastPassedAt !== null || t.visitDays.length > 0 || t.goodTrips + t.badTrips > 0;
 }

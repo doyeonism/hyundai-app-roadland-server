@@ -300,7 +300,7 @@ describe("Roadland car API (e2e)", () => {
     const t = await post<TripResult>("/trips", body, 201);
     expect(t.rejected).toBe(false);
     await prisma.tileVisit.create({data: {vehicleId, q: 123, r: 456, day: daysAgo(seoulDay(new Date()), 8)}});
-    await prisma.tileRecord.create({data: {vehicleId, q: 123, r: 456, lastPassedAt: ended}});
+    await prisma.tileRecord.create({data: {vehicleId, q: 123, r: 456, goodTrips: 1, lastPassedAt: null}});
     await app.get(PrivacyService).cleanup();
     expect(await prisma.tileVisit.count({where: {vehicleId, q: 123, r: 456}})).toBe(0);
     const stored = await prisma.vehicleTrip.findUniqueOrThrow({where: {id: t.id}});
