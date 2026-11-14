@@ -1,3 +1,4 @@
+import { PrivacyService } from "./services/privacy.service";
 import { Module } from "@nestjs/common";
 
 import { CarDevController } from "./controllers/car-dev.controller";
@@ -12,8 +13,9 @@ import { VehicleLockService } from "./services/vehicle-lock.service";
 
 // 로드랜드 차량 게임 API (v1/car). RedisService 는 전역 모듈에서 주입된다.
 @Module({
-  controllers: [CarController, CarDevController],
+  controllers: [CarController, ...(process.env.NODE_ENV !== "production" ? [CarDevController] : [])],
   providers: [
+    PrivacyService,
     GameService,
     VehicleAuthService,
     VehicleLockService,

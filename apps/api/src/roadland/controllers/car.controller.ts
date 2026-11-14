@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Post, UseGuards } from "@nestjs/common";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import { Throttle } from "@nestjs/throttler";
 
@@ -7,6 +7,7 @@ import { ResponseMessage } from "../../shared/decorators/response-message.decora
 import { SubmitTripDto, TileIdParamDto } from "../dtos";
 import { VehicleGuard, VehicleId } from "../guards/vehicle.guard";
 import { CAR_ROUTES } from "../routes";
+import { PrivacyService } from "../services/privacy.service";
 import { GameService } from "../services/game.service";
 import { VehicleAuthService } from "../services/vehicle-auth.service";
 
@@ -20,6 +21,7 @@ export class CarController {
   constructor(
     private readonly game: GameService,
     private readonly auth: VehicleAuthService,
+    private readonly privacy: PrivacyService,
   ) {}
 
   @Post(R.DEVICES)
@@ -29,6 +31,17 @@ export class CarController {
   register() {
     return this.auth.register();
   }
+
+  @Post("privacy/consent")
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(VehicleGuard)
+  consent(@VehicleId() vehicleId: string, @Body("version") version: string) {
+    return this.privacy.consent(vehicleId, version);
+  }
+
+  @Delete("profile")
+  @UseGuards(VehicleGuard)
+  remove(@VehicleId() vehicleId: string) { return this.privacy.remove(vehicleId); }
 
   @Get(R.HOME)
   @UseGuards(VehicleGuard)
@@ -69,8 +82,8 @@ export class CarController {
   @HttpCode(HttpStatus.OK)
   @UseGuards(VehicleGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: "땅 업그레이드(쌓인 수익은 먼저 받는다)" })
-  @ResponseMessage("땅을 올렸어요.")
+  @ApiOperation({ summary: "구버전 땅 업그레이드 요청 거절" })
+  @ResponseMessage("홈에서 개인 레벨을 올려 주세요.")
   upgrade(@VehicleId() vehicleId: string, @Param() { id }: TileIdParamDto) {
     return this.game.upgrade(vehicleId, id);
   }

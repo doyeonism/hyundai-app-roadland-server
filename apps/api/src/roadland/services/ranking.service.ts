@@ -1,9 +1,10 @@
+import { prisma } from "@loadland/database";
 import { Injectable } from "@nestjs/common";
 import type { RankingBoard, RankingEntry } from "@loadland/shared";
 
 import { RedisService } from "../../shared/redis/redis.service";
 import { landRankKey, weeklyRankKey } from "../../shared/redis/keys";
-import { seoulWeek } from "../domain/rules";
+import { daysAgo, seoulWeek } from "../domain/rules";
 
 const TOP = 10;
 const WEEKLY_TTL_SEC = 15 * 24 * 60 * 60;
@@ -25,17 +26,22 @@ export class RankingService {
   }
 
   async addWeekly(vehicleId: string, day: string, credits: number) {
-    if (credits <= 0) return;
-    const key = weeklyRankKey(seoulWeek(day));
-    await this.redis.raw.multi().zincrby(key, credits, vehicleId).expire(key, WEEKLY_TTL_SEC).exec();
+    const week = seoulWeek(day);
+    const sum = await prisma.creditLedger.aggregate({where: {vehicleId, kind: "TRIP", day: {gte: week, lte: daysAgo(week, -6)}}, _sum: {amount: true}});
+    const key = weeklyRankKey(week);
+    await this.redis.raw.multi().zadd(key, sum._sum.amount ?? 0, vehicleId).expire(key, WEEKLY_TTL_SEC).exec();
   }
 
   async remove(vehicleId: string, day: string) {
     await this.redis.raw.multi().zrem(landRankKey(), vehicleId).zrem(weeklyRankKey(seoulWeek(day)), vehicleId).exec();
   }
 
-  land(vehicleId: string) {
-    return this.board(landRankKey(), vehicleId);
+  async land(vehicleId: string): Promise<RankingBoard> {
+    // Historical tile levels must never affect the personal-level game's land ranking.
+    const groups = await prisma.ownedTile.groupBy({by: ["vehicleId"], _count: {_all: true}});
+    groups.sort((a, b) => b._count._all - a._count._all || a.vehicleId.localeCompare(b.vehicleId));
+    const entries = groups.map((row, i) => ({rank: i + 1, name: displayName(row.vehicleId), score: row._count._all, me: row.vehicleId === vehicleId}));
+    return {top: entries.slice(0, TOP), mine: entries.find(row => row.me) ?? null};
   }
 
   weekly(vehicleId: string, day: string) {

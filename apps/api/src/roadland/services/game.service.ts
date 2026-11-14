@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, Injectable } from "@nestjs/common";
 import { Prisma, prisma, type VehicleTrip } from "@loadland/database";
 import type {
   CarHomeResponse,
@@ -28,6 +28,7 @@ import {
   type TileState,
   upgradeCost,
 } from "../domain/rules";
+import { lockVehicles } from "./db-lock";
 import { ClockService } from "./clock.service";
 import { RankingService } from "./ranking.service";
 import { VehicleLockService } from "./vehicle-lock.service";
@@ -143,7 +144,12 @@ export class GameService {
       if (again) return { trip: again, fresh: false };
       const now = await this.clock.now(vehicleId);
       try {
-        return { trip: await prisma.$transaction((tx) => this.settle(tx, vehicleId, input, now)), fresh: true };
+        return { trip: await prisma.$transaction(async tx => {
+          await lockVehicles(tx, [vehicleId]);
+          const existing = await tx.vehicleTrip.findUnique({where: {vehicleId_clientTripId: {vehicleId, clientTripId: input.clientTripId}}});
+          if (existing) return toTripResult(existing);
+          return this.settle(tx, vehicleId, input, now);
+        }, {timeout: 30_000}), fresh: true };
       } catch (e) {
         if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
           const raced = await this.findTrip(vehicleId, input.clientTripId);
@@ -153,20 +159,30 @@ export class GameService {
       }
     });
 
-    if (settled.fresh && settled.trip.credits > 0) {
-      const now = await this.clock.now(vehicleId);
-      await this.ranking.addWeekly(vehicleId, seoulDay(now), settled.trip.credits);
+    if (settled.trip.credits > 0) {
+      const row = await prisma.vehicleTrip.findUniqueOrThrow({where: {id: settled.trip.id}, select: {day: true}});
+      await this.ranking.addWeekly(vehicleId, row.day, settled.trip.credits);
     }
     return settled.trip;
   }
 
   private async settle(tx: Db, vehicleId: string, input: SubmitTripRequest, now: Date): Promise<TripResult> {
+    const vehicleConsent = await tx.vehicle.findUniqueOrThrow({where: {id: vehicleId}, select: {consentVersion: true}});
+    if (vehicleConsent.consentVersion !== "2026-11-14") throw new ForbiddenException("데이터 이용 안내에 동의해 주세요");
     const endedAt = new Date(input.endedAt);
     // 시연 시계를 앞당겼으면 주행 날짜도 같이 민다(실제 운영에서는 shift = 0).
     const shift = now.getTime() - Date.now();
     const day = seoulDay(new Date(endedAt.getTime() + shift));
     const tooNew = endedAt.getTime() > Date.now() + FUTURE_SKEW_MS;
-    const rejected = tooNew || rejectReason(input) !== null;
+    let reason = tooNew ? "future" : rejectReason(input);
+    if (!reason) {
+      const overlap = await tx.vehicleTrip.findFirst({where: {
+        vehicleId, rejected: false,
+        startedAt: {lt: endedAt}, endedAt: {gt: new Date(input.startedAt)},
+      }, select: {id: true}});
+      if (overlap) reason = "overlap";
+    }
+    const rejected = reason !== null;
     const c = tripCredits(input);
 
     const before = rejected ? 0 : await this.driveCredits(tx, vehicleId, day);
@@ -223,6 +239,8 @@ export class GameService {
         excluded: c.excluded,
         capReached,
         rejected,
+        rejectReason: reason,
+        rulesVersion: "2026-11-14-v1",
       },
     });
 
@@ -239,7 +257,7 @@ export class GameService {
           bestSafeStreak: Math.max(vehicle.bestSafeStreak, streak),
         },
       });
-      if (credits > 0) await tx.creditLedger.create({ data: { vehicleId, amount: credits, kind: "TRIP", refId: trip.id } });
+      if (credits > 0) await tx.creditLedger.create({ data: { vehicleId, amount: credits, kind: "TRIP", refId: trip.id, day } });
     }
     return toTripResult(trip);
   }
@@ -264,9 +282,10 @@ export class GameService {
       const now = await this.clock.now(vehicleId);
       try {
         return await prisma.$transaction(async (tx) => {
+          await lockVehicles(tx, [vehicleId, ...(prevOwner ? [prevOwner] : [])]);
           const all = await this.tiles(tx, vehicleId);
           const tile = all.get(id);
-          if (!tile || tile.visitDays.length === 0) throw new BadRequestException("직접 지나간 땅만 살 수 있어요");
+          if (!tile || tile.lastPassedAt === null) throw new BadRequestException("직접 지나간 땅만 살 수 있어요");
           if (tile.ownerId === vehicleId) throw new BadRequestException("이미 내 땅이에요");
           if (tile.ownerId !== prevOwner) throw new ConflictException("방금 주인이 바뀌었어요. 다시 확인해 주세요");
           if (mustRevisit(tile)) throw new BadRequestException("주인이 바뀐 뒤에 다시 지나가야 살 수 있어요");
@@ -321,6 +340,7 @@ export class GameService {
     return this.lock.run(vehicleId, async () => {
       const now = await this.clock.now(vehicleId);
       await prisma.$transaction(async tx => {
+        await lockVehicles(tx, [vehicleId]);
         const vehicle = await tx.vehicle.findUniqueOrThrow({where: {id: vehicleId}});
         if (vehicle.personalLevel !== expectedLevel) throw new ConflictException("레벨이 변경됐어요. 새로고침해 주세요");
         const cost = upgradeCost(vehicle.personalLevel);
@@ -342,6 +362,7 @@ export class GameService {
     return this.lock.run(vehicleId, async () => {
       const now = await this.clock.now(vehicleId);
       return prisma.$transaction(async (tx) => {
+        await lockVehicles(tx, [vehicleId]);
         const owned = (await this.views(tx, vehicleId, now)).filter((t) => t.owned);
         const collected = owned.reduce((n, t) => n + t.pending, 0);
         // 땅마다 다 찬 분만큼만 기준 시각을 옮긴다(1분이 안 찬 몫은 남긴다). 같은 시각끼리 묶어 갱신한다.
@@ -375,10 +396,10 @@ export class GameService {
     await tx.creditLedger.create({ data: { vehicleId, amount, kind, refId } });
   }
 
-  /** 땅 랭킹 점수(레벨 합)를 DB 에서 다시 계산해 Redis 에 쓴다. */
+  /** 땅 랭킹 점수(소유한 칸 수)를 DB 에서 다시 계산해 Redis 에 쓴다. */
   async refreshLand(vehicleId: string) {
-    const { _sum } = await prisma.ownedTile.aggregate({ where: { vehicleId }, _sum: { level: true } });
-    await this.ranking.setLand(vehicleId, _sum.level ?? 0);
+    const count = await prisma.ownedTile.count({where: {vehicleId}});
+    await this.ranking.setLand(vehicleId, count);
   }
 
   // --- 타일 상태 ---------------------------------------------------------------
@@ -444,12 +465,14 @@ export class GameService {
   }
 
   private async driveCredits(db: Db, vehicleId: string, day: string) {
-    const { _sum } = await db.vehicleTrip.aggregate({ where: { vehicleId, day }, _sum: { credits: true } });
-    return _sum.credits ?? 0;
+    const { _sum } = await db.creditLedger.aggregate({
+      where: {vehicleId, kind: "TRIP", day}, _sum: {amount: true},
+    });
+    return _sum.amount ?? 0;
   }
 
   private async today(db: Db, vehicleId: string, day: string): Promise<TodaySummary> {
-    const trips = await db.vehicleTrip.findMany({ where: { vehicleId, day } });
+    const trips = await db.vehicleTrip.findMany({ where: { vehicleId, day, rejected: false } });
     const ids = [...new Set(trips.flatMap((t) => (t.tiles as unknown as TileSegment[]).map((x) => x.id)))];
     return {
       trips: trips.length,
@@ -477,7 +500,7 @@ function ownedCount(tiles: Iterable<TileInfo>, vehicleId: string) {
 
 function toView(t: TileInfo, vehicleId: string, ownedByMe: number, now: Date): LandTileView {
   const owned = t.ownerId === vehicleId;
-  const visited = t.visitDays.length > 0;
+  const visited = t.lastPassedAt !== null;
   const revisit = !owned && mustRevisit(t);
   return {
     id: t.id,
@@ -517,5 +540,7 @@ export function toTripResult(t: VehicleTrip): TripResult {
     breakdown: { clean: t.clean, assistBonus: t.assistBonus, mannerBonus: t.mannerBonus, excluded: t.excluded },
     capReached: t.capReached,
     rejected: t.rejected,
+    rejectReason: t.rejectReason,
+    rulesVersion: t.rulesVersion,
   };
 }

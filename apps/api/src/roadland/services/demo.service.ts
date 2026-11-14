@@ -50,7 +50,7 @@ export class DemoService {
         prisma.creditLedger.deleteMany({ where: { vehicleId } }),
         prisma.vehicle.update({
           where: { id: vehicleId },
-          data: { credits: RULES.welcomeCredits, safeStreak: 0, bestSafeStreak: 0 },
+          data: { credits: RULES.welcomeCredits, personalLevel: 1, safeStreak: 0, bestSafeStreak: 0 },
         }),
         prisma.creditLedger.create({ data: { vehicleId, amount: RULES.welcomeCredits, kind: "WELCOME" } }),
       ]);

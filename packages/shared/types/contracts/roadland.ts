@@ -43,6 +43,8 @@ export interface TripResult {
   credits: number; // 실제로 받은 크레딧(일일 상한 적용 뒤)
   breakdown: { clean: number; assistBonus: number; mannerBonus: number; excluded: number };
   capReached: boolean;
+  rejectReason?: string | null;
+  rulesVersion?: string;
   rejected: boolean; // 기록 검증 실패로 보상 없음
 }
 

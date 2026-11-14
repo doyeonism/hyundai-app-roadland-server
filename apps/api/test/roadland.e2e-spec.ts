@@ -18,7 +18,11 @@ import { AppModule } from "../src/shared/modules/app.module";
 import { setupApplication } from "../src/shared/configs/app.setup";
 import { RedisService } from "../src/shared/redis/redis.service";
 import { routeTiles, COMMUTE } from "../src/roadland/domain/places";
-import { RULES, incomePerDay } from "../src/roadland/domain/rules";
+import { PrivacyService } from "../src/roadland/services/privacy.service";
+import { VehicleLockService } from "../src/roadland/services/vehicle-lock.service";
+import { devToolsEnabled } from "../src/roadland/services/clock.service";
+import { DevToolsGuard } from "../src/roadland/guards/vehicle.guard";
+import { RULES, incomePerDay, seoulDay, daysAgo } from "../src/roadland/domain/rules";
 
 const CAR = `/api/${process.env.PROJECT_NAME}/v1/car`;
 
@@ -32,8 +36,9 @@ describe("Roadland car API (e2e)", () => {
   const auth = () => ({ Authorization: `Bearer ${token}` });
   const commute = routeTiles(COMMUTE).slice(0, 10);
 
+  let tripIndex = 0;
   const trip = (o: Partial<SubmitTripRequest> = {}): SubmitTripRequest => {
-    const ended = new Date(Date.now() - 60_000);
+    const ended = new Date(Date.now() - 60_000 - tripIndex++ * 30 * 60_000);
     return {
       clientTripId: `trip-${Math.random()}`,
       startedAt: new Date(ended.getTime() - 20 * 60_000).toISOString(),
@@ -69,6 +74,7 @@ describe("Roadland car API (e2e)", () => {
 
     const res = await request(server()).post(`${CAR}/devices`).expect(201);
     ({ token, vehicleId } = (res.body as Body<RegisterDeviceResponse>).data);
+    await post("/privacy/consent", {version: "2026-11-14"});
   });
 
   afterAll(async () => {
@@ -188,7 +194,7 @@ describe("Roadland car API (e2e)", () => {
     expect((await get<CarHomeResponse>("/home")).pendingIncome).toBe(0);
   });
 
-  it("땅 랭킹은 Redis 에서 레벨 합으로 보여 준다", async () => {
+  it("땅 랭킹은 소유한 칸 수로 보여 준다", async () => {
     const r = await get<CarRankingResponse>("/ranking");
     expect(r.land.mine).toMatchObject({ rank: 1, score: 2, me: true });
   });
@@ -196,6 +202,7 @@ describe("Roadland car API (e2e)", () => {
   it("다른 차는 내 땅을 거래가 + 100에 빼앗고, 나는 쌓인 수익을 받은 뒤 땅이 레벨 1로 넘어간다", async () => {
     const reg = await request(server()).post(`${CAR}/devices`).expect(201);
     const other = (reg.body as Body<RegisterDeviceResponse>).data;
+    await request(server()).post(`${CAR}/privacy/consent`).set({Authorization: `Bearer ${other.token}`}).send({version: "2026-11-14"}).expect(200);
     const as = (t: string) => ({ Authorization: `Bearer ${t}` });
     const target = commute[0]; // 내 땅, 레벨 2, 거래가 5
 
@@ -248,8 +255,97 @@ describe("Roadland car API (e2e)", () => {
     expect((await get<CarHomeResponse>("/home")).credits).toBe(before);
   });
 
+  it("동의 전에는 주행 수집을 거절하고, 동의를 기록한다", async () => {
+    const reg = (await request(server()).post(`${CAR}/devices`).expect(201)).body.data as RegisterDeviceResponse;
+    const headers = {Authorization: `Bearer ${reg.token}`};
+    await request(server()).post(`${CAR}/trips`).set(headers).send(trip()).expect(403);
+    await request(server()).post(`${CAR}/privacy/consent`).set(headers).send({version: "old"}).expect(400);
+    await request(server()).post(`${CAR}/privacy/consent`).set(headers).send({version: "2026-11-14"}).expect(200);
+    const row = await prisma.vehicle.findUniqueOrThrow({where: {id: reg.vehicleId}});
+    expect(row.consentedAt).not.toBeNull();
+    await request(server()).delete(`${CAR}/profile`).set(headers).expect(200);
+    await request(server()).get(`${CAR}/home`).set(headers).expect(401);
+  });
+
+  it("Redis 잠금이 사라져도 DB 잠금으로 겹친 주행은 한 번만 보상한다", async () => {
+    const body = trip();
+    // Simulate an expired Redis lease: DB row locking must still serialize writes.
+    const bypass = jest.spyOn(app.get(VehicleLockService), "run").mockImplementation(async (_id, work) => work());
+    try {
+      const replies = await Promise.all([0, 1].map(i => post<TripResult>("/trips", {...body, clientTripId: `overlap-${i}`}, 201)));
+      expect(replies.filter(t => !t.rejected)).toHaveLength(1);
+      expect(replies.find(t => t.rejected)?.rejectReason).toBe("overlap");
+      expect(replies.every(t => t.rulesVersion === "2026-11-14-v1")).toBe(true);
+      const ledgers = await prisma.creditLedger.findMany({where: {refId: {in: replies.map(t => t.id)}, kind: "TRIP"}});
+      expect(ledgers).toHaveLength(1);
+      expect(ledgers[0].day).not.toBeNull();
+    } finally { bypass.mockRestore(); }
+  });
+
+  it("일일 한도는 정산 날짜별 원장을 사용한다", async () => {
+    const body = trip();
+    const clockOffset = Number(await app.get(RedisService).get(`rl:clock:${vehicleId}`)) || 0;
+    const day = seoulDay(new Date(new Date(body.endedAt).getTime() + clockOffset));
+    const sum = await prisma.creditLedger.aggregate({where: {vehicleId, day, kind: "TRIP"}, _sum: {amount: true}});
+    await prisma.creditLedger.create({data: {vehicleId, kind: "TRIP", day, amount: RULES.dailyDriveCap - (sum._sum.amount ?? 0), refId: "cap-fixture"}});
+    const result = await post<TripResult>("/trips", body, 201);
+    expect(result.rejected).toBe(false);
+    expect(result.credits).toBe(0);
+    expect(result.capReached).toBe(true);
+  });
+
+  it("90일 경로와 7일 방문 날짜를 지워도 중복 방지와 구매 자격은 남는다", async () => {
+    const ended = new Date(Date.now() - 91 * 86_400_000);
+    const body = trip({clientTripId: "retention-trip", startedAt: new Date(ended.getTime() - 20 * 60_000).toISOString(), endedAt: ended.toISOString()});
+    const t = await post<TripResult>("/trips", body, 201);
+    expect(t.rejected).toBe(false);
+    await prisma.tileVisit.create({data: {vehicleId, q: 123, r: 456, day: daysAgo(seoulDay(new Date()), 8)}});
+    await prisma.tileRecord.create({data: {vehicleId, q: 123, r: 456, lastPassedAt: ended}});
+    await app.get(PrivacyService).cleanup();
+    expect(await prisma.tileVisit.count({where: {vehicleId, q: 123, r: 456}})).toBe(0);
+    const stored = await prisma.vehicleTrip.findUniqueOrThrow({where: {id: t.id}});
+    expect(stored.tiles).toEqual([]);
+    const replay = await post<TripResult>("/trips", body, 201);
+    expect(replay.id).toBe(t.id);
+    const eligible = (await get<TerritoryResponse>("/territory")).tiles.find(x => x.id === "123:456");
+    expect(eligible).toBeDefined();
+    expect(eligible!.buyCost).not.toBeNull();
+  });
+
+  it("운영에서는 개발 시계와 도구가 강제로 차단되고 스테이징은 키를 요구한다", () => {
+    const original = process.env.NODE_ENV;
+    const key = process.env.ROADLAND_DEV_TOKEN;
+    try {
+      process.env.NODE_ENV = "production";
+      expect(devToolsEnabled()).toBe(false);
+      expect(() => new DevToolsGuard().canActivate({} as never)).toThrow();
+      process.env.NODE_ENV = "staging";
+      delete process.env.ROADLAND_DEV_TOKEN;
+      expect(() => new DevToolsGuard().canActivate({} as never)).toThrow();
+      process.env.ROADLAND_DEV_TOKEN = "test-only-key";
+      const context = {switchToHttp: () => ({getRequest: () => ({headers: {"x-roadland-dev-token": "wrong"}})})};
+      expect(() => new DevToolsGuard().canActivate(context as never)).toThrow();
+    } finally {
+      if (original === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = original;
+      if (key === undefined) delete process.env.ROADLAND_DEV_TOKEN; else process.env.ROADLAND_DEV_TOKEN = key;
+    }
+  });
+
+  it("차량별 요청 한도를 넘으면 429를 반환한다", async () => {
+    const redis = app.get(RedisService);
+    const key = `roadland:rate:${vehicleId}:${Math.floor(Date.now() / 60_000)}`;
+    await redis.set(key, "90", 120);
+    await request(server()).get(`${CAR}/home`).set(auth()).expect(429);
+    await redis.del(key);
+  });
+
   it("서버에서 지운 차량의 토큰은 바로 막힌다", async () => {
-    await request(server()).delete(`${CAR}/dev/vehicles/${vehicleId}`).expect(200);
+    await request(server()).delete(`${CAR}/profile`).set(auth()).expect(200);
     await request(server()).get(`${CAR}/home`).set(auth()).expect(401);
+    expect(await prisma.vehicleTrip.count({where: {vehicleId}})).toBe(0);
+    expect(await prisma.creditLedger.count({where: {vehicleId}})).toBe(0);
+    expect(await prisma.tileVisit.count({where: {vehicleId}})).toBe(0);
+    expect(await prisma.tileRecord.count({where: {vehicleId}})).toBe(0);
+    expect(await prisma.ownedTile.count({where: {vehicleId}})).toBe(0);
   });
 });

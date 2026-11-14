@@ -35,7 +35,12 @@ export class VehicleAuthService {
   async resolve(token: string): Promise<string | null> {
     const tokenHash = hash(token);
     const cached = await this.redis.get(vehicleTokenKey(tokenHash));
-    if (cached) return cached;
+    if (cached) {
+      const alive = await prisma.vehicle.findUnique({where: {id: cached}, select: {id: true}});
+      if (alive) return alive.id;
+      await this.redis.del(vehicleTokenKey(tokenHash));
+      return null;
+    }
     const vehicle = await prisma.vehicle.findUnique({ where: { tokenHash }, select: { id: true } });
     if (!vehicle) return null;
     await this.redis.set(vehicleTokenKey(tokenHash), vehicle.id, TOKEN_CACHE_SEC);

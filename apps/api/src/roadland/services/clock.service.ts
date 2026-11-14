@@ -3,7 +3,7 @@ import { Injectable } from "@nestjs/common";
 import { RedisService } from "../../shared/redis/redis.service";
 import { vehicleClockKey } from "../../shared/redis/keys";
 
-export const devToolsEnabled = () => process.env.ROADLAND_DEV_TOOLS === "true";
+export const devToolsEnabled = () => process.env.NODE_ENV !== "production" && process.env.ROADLAND_DEV_TOOLS === "true";
 
 /**
  * 게임 시계. 시연에서 방치 수익을 보여 주려고 차량별로 시간을 앞당길 수 있다(Redis 에 오프셋 저장).
