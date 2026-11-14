@@ -11,9 +11,9 @@ build
 .gitignore
 .DS_Store
 *.log
-./envs
+envs
 .env
-.env.local
+.env.*
 .env.*.local
 npm-debug.log*
 yarn-debug.log*
@@ -29,3 +29,16 @@ docker-compose*.yml
 .dockerignore
 
 /data
+# Never copy credentials or local exports into images
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+**/*.jks
+**/*.keystore
+**/.npmrc
+.ssh
+secrets
+backups
+.task
+output

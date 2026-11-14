@@ -17,12 +17,13 @@ out
 .turbo
 
 # Environment
-./envs
+/envs/*
 .env
 .env.*
-!.env.example
+!/.env.example
+!/envs/.env.example
 # .env.test 는 더미 값(실제 시크릿 아님)만 담고 e2e 재현에 필요하므로 커밋한다.
-!.env.test
+!/envs/.env.test
 
 # IDE / editor
 .idea
@@ -58,3 +59,22 @@ _bmad-output
 /pgdata
 
 .pnpm-store
+# Credentials, local tools, and database exports
+.ssh/
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+id_rsa
+id_ed25519
+.npmrc
+.pypirc
+.netrc
+*.dump
+*.sql.gz
+*.backup
+/backups/
+/secrets/
+/.task/
+/output/
