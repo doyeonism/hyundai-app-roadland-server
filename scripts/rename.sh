@@ -8,28 +8,34 @@
 #   3) PROJECT_NAME       template[-prod|-dev] -> <name>[-prod|-dev]  (envs/.env*)
 #
 # 사용법:
-#   ./scripts/rename.sh <new-name> [scope]
+#   ./scripts/rename.sh <new-name> [scope] [old-name]
 #     <new-name>  루트 패키지명 / PROJECT_NAME 에 쓸 이름 (예: myapp)
 #     [scope]     npm 스코프 (생략 시 <new-name> 사용) -> @<scope>/
+#     [old-name]  지금 쓰고 있는 이름·스코프 (생략 시 template). 이미 한 번 바꾼 뒤 다시 바꿀 때 쓴다.
 #
 # 예:
-#   ./scripts/rename.sh myapp            # @myapp/*, name "myapp", PROJECT_NAME myapp*
-#   ./scripts/rename.sh myapp acme       # @acme/* 로, 나머지는 myapp
+#   ./scripts/rename.sh myapp                  # @myapp/*, name "myapp", PROJECT_NAME myapp*
+#   ./scripts/rename.sh myapp acme             # @acme/* 로, 나머지는 myapp
+#   ./scripts/rename.sh roadland roadland loadland   # loadland -> roadland 로 다시 바꾸기
 #
 # 실행 후 반드시:  pnpm install   (락파일 재생성)
 #
 set -euo pipefail
 
-OLD_SCOPE="template"
-OLD_NAME="template"
-
 if [ $# -lt 1 ]; then
-  echo "사용법: $0 <new-name> [scope]" >&2
+  echo "사용법: $0 <new-name> [scope] [old-name]" >&2
   exit 1
 fi
 
 NEW_NAME="$1"
 NEW_SCOPE="${2:-$1}"
+OLD_NAME="${3:-template}"
+OLD_SCOPE="$OLD_NAME"
+
+if [ "$OLD_NAME" = "$NEW_NAME" ] && [ "$OLD_SCOPE" = "$NEW_SCOPE" ]; then
+  echo "바꿀 이름이 지금 이름($OLD_NAME)과 같습니다." >&2
+  exit 1
+fi
 
 # 프로젝트 루트로 이동 (스크립트 위치 기준)
 cd "$(dirname "$0")/.."

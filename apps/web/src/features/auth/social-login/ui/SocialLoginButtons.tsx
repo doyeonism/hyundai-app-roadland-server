@@ -1,6 +1,6 @@
 "use client";
 
-import { Button } from "@loadland/ui";
+import { Button } from "@roadland/ui";
 
 import { SOCIAL_PROVIDERS_UI, socialAuthUrl } from "../model/providers";
 

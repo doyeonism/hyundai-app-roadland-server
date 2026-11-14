@@ -1,6 +1,6 @@
 import { ExecutionContext, ForbiddenException } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
-import { ROLES } from "@loadland/shared";
+import { ROLES } from "@roadland/shared";
 
 import { RolesGuard } from "./roles.guard";
 import { IS_PUBLIC_KEY } from "../decorators/public.decorator";

@@ -3,7 +3,7 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
-} from "@loadland/ui";
+} from "@roadland/ui";
 
 import { ResetPasswordForm } from "@/features/auth/reset-password";
 

@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
-import { prisma } from "@loadland/database";
+import { prisma } from "@roadland/database";
 
 import { parseTileId } from "../domain/hex";
 import { COMMUTE, RIVERSIDE, routeTiles, sampleRoute } from "../domain/places";

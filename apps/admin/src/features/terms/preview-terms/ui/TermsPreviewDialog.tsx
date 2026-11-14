@@ -8,7 +8,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-} from "@loadland/ui";
+} from "@roadland/ui";
 
 import { usePreviewTerms } from "../model/usePreviewTerms";
 

@@ -13,7 +13,7 @@ import type {
   TermsAgreementInput,
   CreateTermsRequest,
   UpdateTermsActiveRequest,
-} from "@loadland/shared";
+} from "@roadland/shared";
 
 export class TermsAgreementInputDto implements TermsAgreementInput {
   @ApiProperty({ description: "약관 ID" })

@@ -1,5 +1,5 @@
 {
-  "name": "@loadland/shared",
+  "name": "@roadland/shared",
   "version": "1.0.0",
   "description": "",
   "private": true,
@@ -12,7 +12,7 @@
     "build": "tsc"
   },
   "devDependencies": {
-    "@loadland/database": "workspace:*"
+    "@roadland/database": "workspace:*"
   },
   "keywords": [],
   "author": "",

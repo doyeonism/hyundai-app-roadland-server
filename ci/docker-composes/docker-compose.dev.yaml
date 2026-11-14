@@ -26,15 +26,15 @@ services:
     container_name: ${PROJECT_NAME}-server
     working_dir: /app/apps/api
     # 바인드 마운트는 이미지 안의 node_modules 를 가리므로, 마운트된 패키지마다
-    # 익명 볼륨으로 node_modules 를 보존한다. 또한 api 는 @loadland/shared 의 dist 와
+    # 익명 볼륨으로 node_modules 를 보존한다. 또한 api 는 @roadland/shared 의 dist 와
     # prisma generated 클라이언트를 요구하므로 기동 전에 생성/빌드한다 (수 초, 멱등).
     # shared 는 database 의 dist(project reference)에 의존하므로 database → shared 순서.
     command: >
       sh -c "cd /app
-      && pnpm --filter @loadland/database db:generate
-      && pnpm --filter @loadland/database db:deploy
-      && pnpm --filter @loadland/database build
-      && pnpm --filter @loadland/shared build
+      && pnpm --filter @roadland/database db:generate
+      && pnpm --filter @roadland/database db:deploy
+      && pnpm --filter @roadland/database build
+      && pnpm --filter @roadland/shared build
       && pnpm --filter api start:dev"
     volumes:
       - ../../apps/api:/app/apps/api
@@ -83,9 +83,9 @@ services:
   #   # 호스트에 없을 수 있는 generated 클라이언트와 shared dist 를 기동 전에 만든다.
   #   command: >
   #     sh -c "cd /app
-  #     && pnpm --filter @loadland/database db:generate
-  #     && pnpm --filter @loadland/database build
-  #     && pnpm --filter @loadland/shared build
+  #     && pnpm --filter @roadland/database db:generate
+  #     && pnpm --filter @roadland/database build
+  #     && pnpm --filter @roadland/shared build
   #     && pnpm --filter web dev"
   #   volumes:
   #     - ../../apps/web:/app/apps/web
@@ -117,9 +117,9 @@ services:
   #   # 호스트에 없을 수 있는 generated 클라이언트와 shared dist 를 기동 전에 만든다.
   #   command: >
   #     sh -c "cd /app
-  #     && pnpm --filter @loadland/database db:generate
-  #     && pnpm --filter @loadland/database build
-  #     && pnpm --filter @loadland/shared build
+  #     && pnpm --filter @roadland/database db:generate
+  #     && pnpm --filter @roadland/database build
+  #     && pnpm --filter @roadland/shared build
   #     && pnpm --filter admin dev"
   #   volumes:
   #     - ../../apps/admin:/app/apps/admin

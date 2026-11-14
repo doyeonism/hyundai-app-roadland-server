@@ -7,7 +7,7 @@ import {
   type BaseResponse,
   type PaginatedData,
   type PaginationQuery,
-} from "@loadland/shared";
+} from "@roadland/shared";
 
 const Get = async <T, D>(
   url: string,
@@ -21,7 +21,7 @@ const Get = async <T, D>(
   return response;
 };
 
-// 공통 목록 조회 — @loadland/shared 유틸로 쿼리 생성 + 응답 타이핑
+// 공통 목록 조회 — @roadland/shared 유틸로 쿼리 생성 + 응답 타이핑
 const GetList = async <T>(
   url: string,
   query: PaginationQuery = {},

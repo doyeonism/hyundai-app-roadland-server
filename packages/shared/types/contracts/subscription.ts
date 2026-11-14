@@ -1,4 +1,4 @@
-import type { SubscriptionPlan, UserSubscription } from "@loadland/database";
+import type { SubscriptionPlan, UserSubscription } from "@roadland/database";
 
 export interface IssueBillingKeyRequest {
   authKey: string;

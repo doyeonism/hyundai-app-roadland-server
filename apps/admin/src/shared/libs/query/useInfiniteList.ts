@@ -1,6 +1,6 @@
 "use client";
 import { useInfiniteQuery } from "@tanstack/react-query";
-import type { PaginatedData, PaginationQuery } from "@loadland/shared";
+import type { PaginatedData, PaginationQuery } from "@roadland/shared";
 
 import { GetList } from "@/shared/libs/axios/request";
 

@@ -14,8 +14,8 @@ import {
   CardContent,
   CardHeader,
   Spinner,
-} from "@loadland/ui";
-import type { UserWithAgreements } from "@loadland/shared";
+} from "@roadland/ui";
+import type { UserWithAgreements } from "@roadland/shared";
 
 import { usePaginatedList } from "@/shared/libs/query/usePaginatedList";
 import { UserTermsBadges } from "@/entities/user";

@@ -1,4 +1,4 @@
-import { Card, CardContent } from "@loadland/ui";
+import { Card, CardContent } from "@roadland/ui";
 
 import { DashboardStats } from "@/widgets/dashboard-stats";
 

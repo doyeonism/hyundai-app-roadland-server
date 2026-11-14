@@ -15,7 +15,7 @@ import {
   ValidateNested,
 } from "class-validator";
 import { Type } from "class-transformer";
-import type { AdvanceClockRequest, SubmitTripRequest, TileSegment } from "@loadland/shared";
+import type { AdvanceClockRequest, SubmitTripRequest, TileSegment } from "@roadland/shared";
 
 import { RULES } from "../domain/rules";
 

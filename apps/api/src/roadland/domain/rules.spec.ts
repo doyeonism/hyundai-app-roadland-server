@@ -1,4 +1,4 @@
-import type { SubmitTripRequest, TileSegment } from "@loadland/shared";
+import type { SubmitTripRequest, TileSegment } from "@roadland/shared";
 
 import { hexDistance, tileForLatLng } from "./hex";
 import {

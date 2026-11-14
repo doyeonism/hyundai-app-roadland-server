@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
 import { Cron } from "@nestjs/schedule";
-import { prisma } from "@loadland/database";
+import { prisma } from "@roadland/database";
 import { RedisService } from "../../shared/redis/redis.service";
 import { vehicleTokenKey, landRankKey, vehicleClockKey } from "../../shared/redis/keys";
 import { lockVehicles } from "./db-lock";

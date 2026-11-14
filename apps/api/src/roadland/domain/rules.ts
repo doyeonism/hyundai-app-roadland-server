@@ -1,4 +1,4 @@
-import type { SubmitTripRequest } from "@loadland/shared";
+import type { SubmitTripRequest } from "@roadland/shared";
 
 import { hexDistance } from "./hex";
 

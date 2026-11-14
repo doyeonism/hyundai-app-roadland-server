@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import { prisma } from "@loadland/database";
+import { prisma } from "@roadland/database";
 
 import { RedisService } from "../../shared/redis/redis.service";
 

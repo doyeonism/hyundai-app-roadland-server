@@ -1,6 +1,6 @@
 import { ApiProperty } from "@nestjs/swagger";
 import { IsInt, IsNotEmpty, IsString, Min } from "class-validator";
-import type { CreateOrderRequest } from "@loadland/shared";
+import type { CreateOrderRequest } from "@roadland/shared";
 
 export class CreateOrderDto implements CreateOrderRequest {
   @ApiProperty({ description: "주문명", example: "포인트 10,000원 충전" })

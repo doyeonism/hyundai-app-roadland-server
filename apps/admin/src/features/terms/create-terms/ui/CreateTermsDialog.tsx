@@ -19,7 +19,7 @@ import {
   SelectValue,
   Input,
   Label,
-} from "@loadland/ui";
+} from "@roadland/ui";
 
 import { TERMS_TYPE_OPTIONS } from "@/entities/terms";
 

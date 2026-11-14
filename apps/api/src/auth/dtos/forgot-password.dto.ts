@@ -1,6 +1,6 @@
 import { ApiProperty } from "@nestjs/swagger";
 import { IsEmail, IsNotEmpty } from "class-validator";
-import type { ForgotPasswordRequest } from "@loadland/shared";
+import type { ForgotPasswordRequest } from "@roadland/shared";
 
 export class ForgotPasswordDto implements ForgotPasswordRequest {
   @ApiProperty({ description: "가입 이메일", example: "user@example.com" })

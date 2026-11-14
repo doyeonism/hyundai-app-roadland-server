@@ -1,4 +1,4 @@
-import { Badge } from "@loadland/ui";
+import { Badge } from "@roadland/ui";
 
 /** 구독 상태 코드 → 표시 라벨/스타일 매핑 */
 const STATUS_MAP: Record<string, { label: string; className: string }> = {

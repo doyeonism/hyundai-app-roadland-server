@@ -6,8 +6,8 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@loadland/ui";
-import { ROLES } from "@loadland/shared";
+} from "@roadland/ui";
+import { ROLES } from "@roadland/shared";
 
 import { useUpdateUserRole } from "../model/useUpdateUserRole";
 

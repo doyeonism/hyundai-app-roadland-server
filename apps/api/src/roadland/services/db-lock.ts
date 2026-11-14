@@ -1,4 +1,4 @@
-import { Prisma } from "@loadland/database";
+import { Prisma } from "@roadland/database";
 import { UnauthorizedException } from "@nestjs/common";
 
 /** A DB lock outlives the Redis lease and serializes all mutations of each wallet. */

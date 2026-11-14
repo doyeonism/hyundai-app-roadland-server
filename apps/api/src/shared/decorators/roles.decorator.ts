@@ -1,5 +1,5 @@
 import { SetMetadata } from "@nestjs/common";
-import type { Role } from "@loadland/shared";
+import type { Role } from "@roadland/shared";
 
 export const ROLES_KEY = "roles";
 

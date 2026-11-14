@@ -5,7 +5,7 @@ import {
   NotImplementedException,
   UnauthorizedException,
 } from "@nestjs/common";
-import { prisma } from "@loadland/database";
+import { prisma } from "@roadland/database";
 import {
   SOCIAL_PROVIDER_SLUGS,
   SOCIAL_PROVIDERS,
@@ -15,7 +15,7 @@ import {
   type NormalizedSocialProfile,
   type SocialProvider,
   type SocialProviderSlug,
-} from "@loadland/shared";
+} from "@roadland/shared";
 import { env } from "../../shared/configs/env";
 import {
   generateAccessToken,

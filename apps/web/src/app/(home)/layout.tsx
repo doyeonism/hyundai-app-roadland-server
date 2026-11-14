@@ -1,6 +1,6 @@
 import React from "react";
 import ReactQueryProvider from "@/shared/providers/ReactQueryProvider";
-import { Toaster, TooltipProvider } from "@loadland/ui";
+import { Toaster, TooltipProvider } from "@roadland/ui";
 
 interface LayoutProps {
   children: React.ReactNode;

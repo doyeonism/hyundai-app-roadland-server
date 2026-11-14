@@ -68,12 +68,12 @@ jobs:
 
       # 테스트가 import 하는 워크스페이스 패키지의 타입/런타임 산출물 준비
       - name: Generate Prisma client
-        run: pnpm --filter @loadland/database db:generate
+        run: pnpm --filter @roadland/database db:generate
 
       - name: Build workspace deps
         run: |
-          pnpm --filter @loadland/database build
-          pnpm --filter @loadland/shared build
+          pnpm --filter @roadland/database build
+          pnpm --filter @roadland/shared build
 
       - name: Unit tests
         run: pnpm --filter api test

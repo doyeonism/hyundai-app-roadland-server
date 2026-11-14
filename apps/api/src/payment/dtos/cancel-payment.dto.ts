@@ -1,6 +1,6 @@
 import { ApiProperty } from "@nestjs/swagger";
 import { IsInt, IsNotEmpty, IsOptional, IsString, Min } from "class-validator";
-import type { CancelPaymentRequest } from "@loadland/shared";
+import type { CancelPaymentRequest } from "@roadland/shared";
 
 export class CancelPaymentDto implements CancelPaymentRequest {
   @ApiProperty({ description: "취소 사유", example: "고객 변심" })

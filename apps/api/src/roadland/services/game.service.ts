@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable } from "@nestjs/common";
-import { Prisma, prisma, type VehicleTrip } from "@loadland/database";
+import { Prisma, prisma, type VehicleTrip } from "@roadland/database";
 import type {
   CarHomeResponse,
   CarRankingResponse,
@@ -10,7 +10,7 @@ import type {
   TileSegment,
   TodaySummary,
   TripResult,
-} from "@loadland/shared";
+} from "@roadland/shared";
 
 import { parseTileId, tileId } from "../domain/hex";
 import {

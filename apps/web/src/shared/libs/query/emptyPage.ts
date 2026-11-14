@@ -1,4 +1,4 @@
-import type { PaginatedData } from "@loadland/shared";
+import type { PaginatedData } from "@roadland/shared";
 
 // 응답 data 가 없을 때(에러/빈 응답)의 안전한 기본값
 export const emptyPage = <T>(): PaginatedData<T> => ({

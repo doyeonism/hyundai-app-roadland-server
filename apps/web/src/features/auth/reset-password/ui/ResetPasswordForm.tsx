@@ -9,7 +9,7 @@ import {
   FieldError,
   FieldLabel,
   Input,
-} from "@loadland/ui";
+} from "@roadland/ui";
 
 import { useResetPassword } from "../model/useResetPassword";
 

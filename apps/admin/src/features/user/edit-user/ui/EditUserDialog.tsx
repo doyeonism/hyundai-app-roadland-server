@@ -17,7 +17,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@loadland/ui";
+} from "@roadland/ui";
 
 import { useUpdateUser } from "../model/useUpdateUser";
 

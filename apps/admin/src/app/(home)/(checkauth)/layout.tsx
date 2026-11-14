@@ -1,8 +1,8 @@
 import React from "react";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
-import type { BaseResponse, MeResponse } from "@loadland/shared";
-import { USER_STATUS } from "@loadland/shared";
+import type { BaseResponse, MeResponse } from "@roadland/shared";
+import { USER_STATUS } from "@roadland/shared";
 import { apiUrl } from "@/shared/libs/axios/base-url";
 import { Sidebar } from "@/widgets/sidebar";
 

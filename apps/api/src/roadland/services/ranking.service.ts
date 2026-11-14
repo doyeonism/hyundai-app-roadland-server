@@ -1,6 +1,6 @@
-import { prisma } from "@loadland/database";
+import { prisma } from "@roadland/database";
 import { Injectable } from "@nestjs/common";
-import type { RankingBoard, RankingEntry } from "@loadland/shared";
+import type { RankingBoard, RankingEntry } from "@roadland/shared";
 
 import { RedisService } from "../../shared/redis/redis.service";
 import { landRankKey, weeklyRankKey } from "../../shared/redis/keys";

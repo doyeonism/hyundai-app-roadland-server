@@ -4,7 +4,7 @@ const nextConfig: NextConfig = {
   /* config options here */
   output: "standalone",
   reactCompiler: true,
-  transpilePackages: ["@loadland/database"],
+  transpilePackages: ["@roadland/database"],
 };
 
 export default nextConfig;

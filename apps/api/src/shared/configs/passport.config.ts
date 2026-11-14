@@ -2,7 +2,7 @@ import { Injectable, UnauthorizedException } from "@nestjs/common";
 import { PassportStrategy } from "@nestjs/passport";
 import { Request } from "express";
 import { ExtractJwt, Strategy } from "passport-jwt";
-import type { Role } from "@loadland/shared";
+import type { Role } from "@roadland/shared";
 
 import * as CONST from "../constants";
 import { RedisService } from "../redis/redis.service";

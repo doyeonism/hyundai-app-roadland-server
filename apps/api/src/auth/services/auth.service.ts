@@ -8,8 +8,8 @@ import {
   UnauthorizedException,
 } from "@nestjs/common";
 import { MailerService } from "@nestjs-modules/mailer";
-import { prisma, type User } from "@loadland/database";
-import { USER_STATUS } from "@loadland/shared";
+import { prisma, type User } from "@roadland/database";
+import { USER_STATUS } from "@roadland/shared";
 import * as bcrypt from "bcryptjs";
 import {
   ForgotPasswordDto,

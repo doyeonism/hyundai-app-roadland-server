@@ -4,7 +4,7 @@ import type {
   SubscriptionPlan,
   UserTermsAgreement,
   Terms,
-} from "@loadland/database";
+} from "@roadland/database";
 import type { Role } from "../../src/roles";
 import type { SafeUser } from "../models/auth/user";
 

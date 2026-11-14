@@ -1,4 +1,4 @@
-import type { UserWithAgreements } from "@loadland/shared";
+import type { UserWithAgreements } from "@roadland/shared";
 
 type Agreement = NonNullable<UserWithAgreements["termsAgreements"]>[number];
 
